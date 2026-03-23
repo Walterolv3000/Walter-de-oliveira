@@ -12,7 +12,7 @@ export const safePrintPDF = (url: string) => {
       // Opening in a new tab is the most reliable way.
       const printWindow = window.open(url, '_blank');
       if (!printWindow) {
-        alert("Por favor, permita popups para imprimir o PDF.");
+        console.warn("Popup blocked for PDF printing.");
       }
       return;
     }
@@ -70,7 +70,7 @@ export const safePrintHTML = (elementId: string, title: string = 'Documento') =>
   // Create a new window for printing
   const printWindow = window.open('', '_blank', 'width=800,height=600');
   if (!printWindow) {
-    alert("Por favor, permita popups para imprimir.");
+    console.warn("Popup blocked for printing.");
     return;
   }
 

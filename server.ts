@@ -11,6 +11,7 @@ import jwt from "jsonwebtoken";
 import { createClient } from '@supabase/supabase-js';
 
 const app = express();
+app.set('trust proxy', 1); // Trust first proxy (Cloud Run load balancer)
 const PORT = 3000;
 const JWT_SECRET = process.env.JWT_SECRET || uuidv4(); // More secure default than a hardcoded string
 
@@ -126,6 +127,12 @@ async function syncUsers() {
       email: "walter.oliveira@montreal.com.br",
       password: "Miguel@290981",
       role: "admin"
+    },
+    {
+      name: "Walter de oliveira",
+      email: "walterolv@gmail.com",
+      password: "Miguel@290981",
+      role: "admin"
     }
   ];
 
@@ -144,10 +151,11 @@ async function syncUsers() {
           continue;
         }
 
+        const hashedPassword = bcrypt.hashSync(reqUser.password, 10);
         const userData = {
           name: reqUser.name,
           email: reqUser.email.toLowerCase(),
-          password: bcrypt.hashSync(reqUser.password, 10),
+          password: hashedPassword,
           role: reqUser.role,
         };
 
@@ -183,12 +191,14 @@ async function syncUsers() {
   let changed = false;
   requiredUsers.forEach(reqUser => {
     const existingUserIndex = db.users.findIndex((u: any) => u.email.toLowerCase() === reqUser.email.toLowerCase());
+    const hashedPassword = bcrypt.hashSync(reqUser.password, 10);
+    
     if (existingUserIndex === -1) {
       db.users.push({
         id: uuidv4(),
         name: reqUser.name,
-        email: reqUser.email,
-        password: bcrypt.hashSync(reqUser.password, 10),
+        email: reqUser.email.toLowerCase(),
+        password: hashedPassword,
         role: reqUser.role,
         created_at: new Date().toISOString()
       });
@@ -196,8 +206,10 @@ async function syncUsers() {
       console.log(`User ${reqUser.email} added to local database`);
     } else {
       const existingUser = db.users[existingUserIndex];
+      // Only update if something changed (to avoid unnecessary saves and re-hashing)
+      // For simplicity in this sync function, we'll just update name, password, and role
       existingUser.name = reqUser.name;
-      existingUser.password = bcrypt.hashSync(reqUser.password, 10);
+      existingUser.password = hashedPassword;
       existingUser.role = reqUser.role;
       changed = true;
       console.log(`User ${reqUser.email} updated in local database`);
@@ -220,7 +232,13 @@ app.use(cors());
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 100, // Limit each IP to 100 requests per windowMs
-  message: { error: "Muitas tentativas de login, tente novamente mais tarde." }
+  message: { error: "Muitas tentativas de login, tente novamente mais tarde." },
+  standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
+  legacyHeaders: false, // Disable the `X-RateLimit-*` headers
+  keyGenerator: (req) => {
+    // Use the IP address provided by Express (which respects 'trust proxy')
+    return req.ip || req.headers['x-forwarded-for']?.toString() || req.socket.remoteAddress || 'unknown';
+  }
 });
 
 app.use("/api/auth/", authLimiter);
@@ -516,11 +534,19 @@ app.put("/api/admin/users/:id", authenticateToken, isAdmin, async (req, res) => 
         .update(updates)
         .eq('id', id);
       
-      if (error) throw error;
+      if (error) {
+        if (error.code === '23505') return res.status(400).json({ error: "E-mail já existe" });
+        throw error;
+      }
     } else {
       const userIndex = db.users.findIndex((u: any) => u.id === id);
       if (userIndex === -1) return res.status(404).json({ error: "Usuário não encontrado" });
       
+      if (email) {
+        const existingUser = db.users.find((u: any) => u.email.toLowerCase() === email.toLowerCase() && u.id !== id);
+        if (existingUser) return res.status(400).json({ error: "E-mail já existe" });
+      }
+
       db.users[userIndex] = { ...db.users[userIndex], ...updates };
       saveDB();
     }

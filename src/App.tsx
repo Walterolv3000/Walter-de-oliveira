@@ -1473,7 +1473,7 @@ export default function App() {
   }
 
   if (isAdminView && user.role === 'admin') {
-    return <AdminDashboard token={token} onBack={() => setIsAdminView(false)} />;
+    return <AdminDashboard token={token} onBack={() => setIsAdminView(false)} showToast={showToast} />;
   }
 
   return (

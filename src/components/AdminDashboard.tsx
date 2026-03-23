@@ -19,9 +19,10 @@ interface UserData {
 interface AdminDashboardProps {
   token: string;
   onBack: () => void;
+  showToast: (message: string, type?: 'success' | 'error' | 'info') => void;
 }
 
-export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, onBack }) => {
+export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, onBack, showToast }) => {
   const [users, setUsers] = useState<UserData[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
@@ -134,12 +135,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, onBack })
       if (response.ok) {
         setIsModalOpen(false);
         fetchUsers();
+        showToast(editingUser ? "Usuário atualizado com sucesso" : "Usuário criado com sucesso");
       } else {
         const data = await response.json();
-        alert(data.error || "Erro ao salvar usuário");
+        showToast(data.error || "Erro ao salvar usuário", "error");
       }
     } catch (err) {
-      alert("Erro de conexão");
+      showToast("Erro de conexão", "error");
     }
   };
 
@@ -164,13 +166,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, onBack })
 
       if (response.ok) {
         setIsPasswordResetModalOpen(false);
-        alert("Senha resetada com sucesso!");
+        showToast("Senha resetada com sucesso!");
       } else {
         const data = await response.json();
-        alert(data.error || "Erro ao resetar senha");
+        showToast(data.error || "Erro ao resetar senha", "error");
       }
     } catch (err) {
-      alert("Erro de conexão");
+      showToast("Erro de conexão", "error");
     } finally {
       setIsLoading(false);
     }
@@ -194,7 +196,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, onBack })
       
       const payload = JSON.parse(jsonPayload);
       if (payload.id === user.id) {
-        alert("Você não pode excluir seu próprio usuário enquanto estiver logado.");
+        showToast("Você não pode excluir seu próprio usuário enquanto estiver logado.", "error");
         return;
       }
     } catch (e) {
@@ -218,12 +220,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, onBack })
       if (response.ok) {
         setUsers(prev => prev.filter(u => u.id !== userToDelete.id));
         setIsDeleteModalOpen(false);
+        showToast("Usuário excluído com sucesso");
       } else {
         const data = await response.json();
-        alert(data.error || "Erro ao excluir usuário");
+        showToast(data.error || "Erro ao excluir usuário", "error");
       }
     } catch (err) {
-      alert("Erro de conexão ao tentar excluir");
+      showToast("Erro de conexão ao tentar excluir", "error");
     } finally {
       setIsDeleting(false);
       setUserToDelete(null);
@@ -268,12 +271,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, onBack })
       if (response.ok) {
         setIsPromptModalOpen(false);
         fetchPrompts();
+        showToast(editingPrompt ? "Prompt atualizado com sucesso" : "Prompt criado com sucesso");
       } else {
         const data = await response.json();
-        alert(data.error || "Erro ao salvar prompt");
+        showToast(data.error || "Erro ao salvar prompt", "error");
       }
     } catch (err) {
-      alert("Erro de conexão");
+      showToast("Erro de conexão", "error");
     } finally {
       setIsLoading(false);
     }
@@ -292,14 +296,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, onBack })
       if (response.ok) {
         setPrompts(prev => prev.filter(p => p.id !== promptToDelete.id));
         setIsPromptDeleteModalOpen(false);
+        showToast("Prompt excluído com sucesso");
       } else {
         const data = await response.json();
-        alert(data.error || "Erro ao excluir prompt");
+        showToast(data.error || "Erro ao excluir prompt", "error");
       }
     } catch (err) {
-      alert("Erro de conexão ao tentar excluir");
+      showToast("Erro de conexão ao tentar excluir", "error");
     } finally {
       setIsLoading(false);
+      setPromptToDelete(null);
     }
   };
 

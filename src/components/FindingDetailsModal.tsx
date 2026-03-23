@@ -23,7 +23,6 @@ export const FindingDetailsModal: React.FC<FindingDetailsModalProps> = ({
     if (!finding.page || !onGoToPage) return;
     const pageNum = parseInt(finding.page);
     if (isNaN(pageNum)) {
-      alert("Número de página inválido.");
       return;
     }
     onGoToPage(pageNum);
