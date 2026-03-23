@@ -53,9 +53,10 @@ CREATE TABLE IF NOT EXISTS favorites (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- Initial Admin Users (Optional - you can also register them)
--- INSERT INTO users (name, email, password, role) 
--- VALUES ('Walter Oliveira', 'walterolv@gmail.com', 'HASHED_PASSWORD_HERE', 'admin');
+-- Initial Users
+-- Walter de oliveira: Admin
+-- Claudio Eustaquio Da Silva: Admin
+-- Herbert Giocondo De Almeida: User
 
 -- Initial Default Prompt
 INSERT INTO prompts (name, prompt, is_default)

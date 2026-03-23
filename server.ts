@@ -3,6 +3,8 @@ import multer from "multer";
 import path from "path";
 import fs from "fs";
 import cors from "cors";
+import helmet from "helmet";
+import { rateLimit } from "express-rate-limit";
 import { v4 as uuidv4 } from "uuid";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
@@ -10,7 +12,7 @@ import { createClient } from '@supabase/supabase-js';
 
 const app = express();
 const PORT = 3000;
-const JWT_SECRET = process.env.JWT_SECRET || "super-secret-key-change-me";
+const JWT_SECRET = process.env.JWT_SECRET || uuidv4(); // More secure default than a hardcoded string
 
 // Supabase Setup
 const supabaseUrl = process.env.VITE_SUPABASE_URL || "";
@@ -49,10 +51,26 @@ function loadDB() {
           },
           {
             id: uuidv4(),
-            name: "Walter Oliveira (Montreal)",
+            name: "Walter de oliveira",
             email: "walter.oliveira@montreal.com.br",
-            password: bcrypt.hashSync("123456", 10),
+            password: bcrypt.hashSync("Miguel@290981", 10),
             role: "admin",
+            created_at: new Date().toISOString()
+          },
+          {
+            id: uuidv4(),
+            name: "Herbert Giocondo De Almeida",
+            email: "herbert.almeida@montreal.com.br",
+            password: bcrypt.hashSync("Montreal@2026", 10),
+            role: "user",
+            created_at: new Date().toISOString()
+          },
+          {
+            id: uuidv4(),
+            name: "Claudio Eustaquio Da Silva",
+            email: "claudioeustaquio@montreal.com.br",
+            password: bcrypt.hashSync("Montreal@2026", 10),
+            role: "user",
             created_at: new Date().toISOString()
           }
         ],
@@ -88,7 +106,125 @@ function saveDB() {
 // Initial load
 loadDB();
 
+// Sync requested users
+async function syncUsers() {
+  const requiredUsers = [
+    {
+      name: "Herbert Giocondo De Almeida",
+      email: "herbert.almeida@montreal.com.br",
+      password: "Montreal@2026",
+      role: "user"
+    },
+    {
+      name: "Claudio Eustaquio Da Silva",
+      email: "claudioeustaquio@montreal.com.br",
+      password: "Montreal@2026",
+      role: "admin"
+    },
+    {
+      name: "Walter de oliveira",
+      email: "walter.oliveira@montreal.com.br",
+      password: "Miguel@290981",
+      role: "admin"
+    }
+  ];
+
+  if (isSupabaseConfigured) {
+    console.log("Syncing users with Supabase...");
+    for (const reqUser of requiredUsers) {
+      try {
+        const { data: existingUser, error: fetchError } = await supabase
+          .from('users')
+          .select('*')
+          .ilike('email', reqUser.email)
+          .single();
+
+        if (fetchError && fetchError.code !== 'PGRST116') {
+          console.error(`Error fetching user ${reqUser.email} from Supabase:`, fetchError);
+          continue;
+        }
+
+        const userData = {
+          name: reqUser.name,
+          email: reqUser.email.toLowerCase(),
+          password: bcrypt.hashSync(reqUser.password, 10),
+          role: reqUser.role,
+        };
+
+        if (!existingUser) {
+          const { error: insertError } = await supabase
+            .from('users')
+            .insert([{ ...userData, id: uuidv4(), created_at: new Date().toISOString() }]);
+          
+          if (insertError) {
+            console.error(`Error inserting user ${reqUser.email} into Supabase:`, insertError);
+          } else {
+            console.log(`User ${reqUser.email} added to Supabase`);
+          }
+        } else {
+          const { error: updateError } = await supabase
+            .from('users')
+            .update(userData)
+            .eq('id', existingUser.id);
+          
+          if (updateError) {
+            console.error(`Error updating user ${reqUser.email} in Supabase:`, updateError);
+          } else {
+            console.log(`User ${reqUser.email} updated in Supabase`);
+          }
+        }
+      } catch (err) {
+        console.error(`Unexpected error syncing user ${reqUser.email} with Supabase:`, err);
+      }
+    }
+  }
+
+  // Also sync with local DB as fallback
+  let changed = false;
+  requiredUsers.forEach(reqUser => {
+    const existingUserIndex = db.users.findIndex((u: any) => u.email.toLowerCase() === reqUser.email.toLowerCase());
+    if (existingUserIndex === -1) {
+      db.users.push({
+        id: uuidv4(),
+        name: reqUser.name,
+        email: reqUser.email,
+        password: bcrypt.hashSync(reqUser.password, 10),
+        role: reqUser.role,
+        created_at: new Date().toISOString()
+      });
+      changed = true;
+      console.log(`User ${reqUser.email} added to local database`);
+    } else {
+      const existingUser = db.users[existingUserIndex];
+      existingUser.name = reqUser.name;
+      existingUser.password = bcrypt.hashSync(reqUser.password, 10);
+      existingUser.role = reqUser.role;
+      changed = true;
+      console.log(`User ${reqUser.email} updated in local database`);
+    }
+  });
+
+  if (changed) {
+    saveDB();
+  }
+}
+
+syncUsers();
+
+app.use(helmet({
+  contentSecurityPolicy: false, // Disable CSP for development iframe compatibility
+}));
 app.use(cors());
+
+// Rate limiting for auth routes
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100, // Limit each IP to 100 requests per windowMs
+  message: { error: "Muitas tentativas de login, tente novamente mais tarde." }
+});
+
+app.use("/api/auth/", authLimiter);
+
 app.use(express.json({ limit: '500mb' }));
 app.use(express.urlencoded({ limit: '500mb', extended: true }));
 
