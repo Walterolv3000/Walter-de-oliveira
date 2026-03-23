@@ -527,7 +527,7 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({
             <div 
               key={i}
               className={cn(
-                "absolute pointer-events-none mix-blend-multiply dark:mix-blend-screen transition-colors duration-200 print:hidden",
+                "absolute pointer-events-none mix-blend-multiply dark:mix-blend-screen transition-colors duration-200",
                 h.isCurrent ? "bg-orange-400/60 z-20" : "z-10"
               )}
               style={{

@@ -7,6 +7,8 @@ import {
   ArrowUpDown, MoreVertical, Filter, PanelRightOpen, PanelRightClose, PanelRight, PanelLeft,
   LayoutList, Copy, Pencil, RotateCcw
 } from 'lucide-react';
+import * as pdfjsLib from 'pdfjs-dist';
+import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.mjs?url';
 import { safePrintPDF, safePrintHTML } from './lib/printUtils';
 import { PDFViewer } from './components/PDFViewer';
 import { DetailedAnalysisModal } from './components/DetailedAnalysisModal';
@@ -609,7 +611,10 @@ export default function App() {
   const getPdfBlob = useCallback(async () => {
     if (!pdfUrl) return null;
     
-    if ((edits || []).length === 0) {
+    const hasManualEdits = (edits || []).length > 0 || (textHighlights || []).length > 0;
+    const hasSearchHighlights = showHighlights && (fixedKeywords.length > 0 || searchQuery.length > 0);
+
+    if (!hasManualEdits && !hasSearchHighlights) {
       const response = await fetch(pdfUrl, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
@@ -635,9 +640,70 @@ export default function App() {
       }))
     ];
 
+    // Add search highlights if active
+    if (hasSearchHighlights) {
+      try {
+        pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
+        const loadingTask = pdfjsLib.getDocument({
+          url: pdfUrl.startsWith('/') ? `${window.location.origin}${pdfUrl}` : pdfUrl,
+          httpHeaders: token ? { 'Authorization': `Bearer ${token}` } : undefined,
+          withCredentials: true,
+        });
+        const pdfDoc = await loadingTask.promise;
+        const queries = [...fixedKeywords, searchQuery].filter(q => q.trim().length > 0).map(q => q.toLowerCase());
+
+        for (let pageNum = 1; pageNum <= pdfDoc.numPages; pageNum++) {
+          const page = await pdfDoc.getPage(pageNum);
+          const textContent = await page.getTextContent();
+          const viewport = page.getViewport({ scale: 1.0 });
+          const pageHighlights: { x: number, y: number, w: number, h: number }[] = [];
+
+          textContent.items.forEach((item: any) => {
+            const str = item.str.toLowerCase();
+            queries.forEach((query) => {
+              let startIdx = 0;
+              while ((startIdx = str.indexOf(query, startIdx)) !== -1) {
+                // Get coordinates in PDF points
+                // pdfjs transform is [scaleX, skewX, skewY, scaleY, translateX, translateY]
+                // translateX and translateY are in PDF points (bottom-left origin)
+                // However, our editPdf expects coordinates from TOP-LEFT because it uses transformCoord
+                // So we use viewport.convertToViewportPoint to get top-left relative coordinates at scale 1.0
+                const [x, y] = viewport.convertToViewportPoint(item.transform[4], item.transform[5]);
+                const width = item.width;
+                const height = item.height;
+
+                pageHighlights.push({
+                  x,
+                  y: y - height,
+                  w: width,
+                  h: height
+                });
+                
+                startIdx += query.length;
+              }
+            });
+          });
+
+          if (pageHighlights.length > 0) {
+            allEdits.push({
+              type: 'text-highlight' as const,
+              page: pageNum,
+              rects: pageHighlights,
+              color: highlightColor,
+              opacity: 0.4,
+              x: 0,
+              y: 0
+            });
+          }
+        }
+      } catch (err) {
+        console.error("Error calculating search highlights for print:", err);
+      }
+    }
+
     const editedPdfBytes = await editPdf(existingPdfBytes, allEdits, 1.0);
     return new Blob([editedPdfBytes], { type: 'application/pdf' });
-  }, [pdfUrl, edits, textHighlights, token]);
+  }, [pdfUrl, edits, textHighlights, token, showHighlights, fixedKeywords, searchQuery, highlightColor]);
 
   const handlePrint = useCallback(async () => {
     if (!pdfUrl) return;
