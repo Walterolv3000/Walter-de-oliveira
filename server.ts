@@ -13,7 +13,7 @@ import { createClient } from '@supabase/supabase-js';
 const app = express();
 app.set('trust proxy', 1); // Trust first proxy (Cloud Run load balancer)
 const PORT = 3000;
-const JWT_SECRET = process.env.JWT_SECRET || uuidv4(); // More secure default than a hardcoded string
+const JWT_SECRET = process.env.JWT_SECRET || "pdf-analyzer-secret-key-2026"; // Static fallback to prevent logout on restarts
 
 // Supabase Setup
 const supabaseUrl = process.env.VITE_SUPABASE_URL || "";
@@ -262,7 +262,8 @@ const authenticateToken = (req: AuthRequest, res: express.Response, next: expres
     req.user = verified;
     next();
   } catch (err) {
-    res.status(403).json({ error: "Invalid token" });
+    console.error(`[${new Date().toISOString()}] Auth failed for token: ${token.substring(0, 10)}... Error:`, err instanceof Error ? err.message : err);
+    res.status(401).json({ error: "Invalid token" });
   }
 };
 

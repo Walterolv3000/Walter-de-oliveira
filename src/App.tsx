@@ -1134,6 +1134,12 @@ export default function App() {
       
       if (!response.ok) {
         console.error("Upload failed with status:", response.status);
+        
+        if (response.status === 401 || response.status === 403) {
+          handleLogout();
+          throw new Error("Sessão expirada ou acesso negado. Por favor, entre novamente.");
+        }
+
         if (responseText.includes("<!doctype html>") || responseText.includes("<html")) {
           console.error("Server returned HTML instead of JSON. Full response (first 500 chars):", responseText.substring(0, 500));
           throw new Error("O servidor retornou uma página de erro (HTML). Isso pode ser causado por um arquivo muito grande ou tempo limite excedido.");
