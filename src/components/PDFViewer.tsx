@@ -1,12 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Loader2, X } from 'lucide-react';
 import * as pdfjsLib from 'pdfjs-dist';
+import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.mjs?url';
 import { motion } from 'motion/react';
 import { cn } from '../lib/utils';
 
-// Set worker path using a CDN that matches the version of pdfjs-dist
-const PDFJS_VERSION = '5.4.624';
-pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${PDFJS_VERSION}/build/pdf.worker.min.mjs`;
+// Set worker path using the local worker from the package
+pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
 
 interface PDFViewerProps {
   url: string;
@@ -74,17 +74,32 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({
   useEffect(() => {
     let isMounted = true;
     const loadPdf = async () => {
+      if (!url) return;
+      
       setIsLoading(true);
       setError(null);
+      setPdf(null); // Clear previous PDF
+      
       try {
+        console.log("Loading PDF from URL:", url);
+        
+        // Ensure URL is absolute if it starts with /api
+        const finalUrl = url.startsWith('/') ? `${window.location.origin}${url}` : url;
+        
         const loadingTask = pdfjsLib.getDocument({
-          url,
-          httpHeaders: token ? { 'Authorization': `Bearer ${token}` } : undefined
+          url: finalUrl,
+          httpHeaders: token ? { 'Authorization': `Bearer ${token}` } : undefined,
+          withCredentials: true, // Important for some proxy setups
+          cMapUrl: `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/cmaps/`,
+          cMapPacked: true,
+          standardFontDataUrl: `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/standard_fonts/`,
         });
+        
         const pdfDoc = await loadingTask.promise;
         
         if (!isMounted) return;
         setPdf(pdfDoc);
+        console.log("PDF loaded successfully, pages:", pdfDoc.numPages);
 
         // Extract text and thumbnails in background
         const extractData = async () => {
@@ -139,7 +154,21 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({
       } catch (err: any) {
         if (isMounted) {
           console.error("PDF Load Error:", err);
-          setError(`Não foi possível carregar o PDF. Verifique se o arquivo é válido. (${err.message})`);
+          let errorMessage = "Não foi possível carregar o PDF.";
+          
+          if (err.name === 'PasswordException') {
+            errorMessage = "Este PDF está protegido por senha.";
+          } else if (err.name === 'InvalidPDFException') {
+            errorMessage = "O arquivo PDF parece estar corrompido ou é inválido.";
+          } else if (err.name === 'MissingPDFException') {
+            errorMessage = "O arquivo PDF não foi encontrado no servidor.";
+          } else if (err.message.includes('401') || err.message.includes('403')) {
+            errorMessage = "Sessão expirada ou sem permissão para acessar este arquivo.";
+          } else {
+            errorMessage += ` (${err.message || 'Erro desconhecido'})`;
+          }
+          
+          setError(errorMessage);
         }
       } finally {
         if (isMounted) setIsLoading(false);
