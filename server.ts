@@ -824,11 +824,15 @@ app.get(["/api/documents/:id/pdf", "/api/documents/:id/pdf/"], authenticateToken
       doc = db.documents.find((d: any) => d.id === id);
     }
 
-    if (!doc) return res.status(404).json({ error: "Não encontrado" });
+    if (!doc) {
+      console.log(`[404] Document metadata not found for ID: ${id}`);
+      return res.status(404).json({ error: "Documento não encontrado no banco de dados" });
+    }
 
     const filePath = path.join(uploadsDir, doc.path);
     if (!fs.existsSync(filePath)) {
-      return res.status(404).json({ error: "Arquivo não encontrado no servidor" });
+      console.error(`[404] PDF file missing on disk: ${filePath} (Doc ID: ${id})`);
+      return res.status(404).json({ error: "Arquivo físico não encontrado no servidor. O servidor pode ter sido reiniciado." });
     }
 
     res.setHeader('Content-Type', 'application/pdf');
@@ -1107,8 +1111,13 @@ app.delete(["/api/documents/:id/favorites/:favoriteId", "/api/documents/:id/favo
 
 // 404 for API routes - ensure this is the LAST API route
 app.all("/api/*", (req, res) => {
-  console.log(`API 404: ${req.method} ${req.url}`);
-  res.status(404).json({ error: `API route not found: ${req.originalUrl}` });
+  const logMsg = `API 404: ${req.method} ${req.url} - IP: ${req.ip}`;
+  console.log(logMsg);
+  res.status(404).json({ 
+    error: "Rota da API não encontrada",
+    path: req.originalUrl,
+    method: req.method
+  });
 });
 
 // Global error handler

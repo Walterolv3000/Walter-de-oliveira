@@ -164,6 +164,8 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({
             errorMessage = "O arquivo PDF não foi encontrado no servidor.";
           } else if (err.message.includes('401') || err.message.includes('403')) {
             errorMessage = "Sessão expirada ou sem permissão para acessar este arquivo.";
+          } else if (err.message.includes('404')) {
+            errorMessage = "O arquivo PDF não foi encontrado no servidor. O servidor pode ter sido reiniciado e os arquivos temporários foram apagados.";
           } else {
             errorMessage += ` (${err.message || 'Erro desconhecido'})`;
           }

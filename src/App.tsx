@@ -243,6 +243,7 @@ export default function App() {
   
   // Detailed Analysis
   const [isDetailedAnalysisOpen, setIsDetailedAnalysisOpen] = useState(false);
+  const [isBulkKeywordsModalOpen, setIsBulkKeywordsModalOpen] = useState(false);
   const chatEndRef = React.useRef<HTMLDivElement>(null);
 
   // Text Highlighting State
@@ -1384,6 +1385,17 @@ export default function App() {
     if (searchQuery && !fixedKeywords.includes(searchQuery)) {
       setFixedKeywords([...fixedKeywords, searchQuery]);
       setSearchQuery("");
+    }
+  };
+
+  const addFixedKeywordsList = (list: string) => {
+    const newKeywords = list
+      .split(/[,;\n]/)
+      .map(k => k.trim())
+      .filter(k => k && !fixedKeywords.includes(k));
+    
+    if (newKeywords.length > 0) {
+      setFixedKeywords([...fixedKeywords, ...newKeywords]);
     }
   };
 
@@ -2530,6 +2542,9 @@ export default function App() {
                     handleClearAllSearch={handleClearAllSearch}
                     fixedKeywords={fixedKeywords}
                     addFixedKeyword={addFixedKeyword}
+                    addFixedKeywordsList={addFixedKeywordsList}
+                    isBulkKeywordsModalOpen={isBulkKeywordsModalOpen}
+                    setIsBulkKeywordsModalOpen={setIsBulkKeywordsModalOpen}
                     removeFixedKeyword={removeFixedKeyword}
                     groupedMatches={groupedMatches}
                     navigateKeywordMatch={navigateKeywordMatch}

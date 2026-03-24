@@ -1,5 +1,5 @@
 import React from 'react';
-import { Search, X, ChevronLeft, ChevronRight, FileText, Plus, ChevronDown } from 'lucide-react';
+import { Search, X, ChevronLeft, ChevronRight, FileText, Plus, ChevronDown, List } from 'lucide-react';
 import { motion } from 'motion/react';
 import { cn } from '../lib/utils';
 
@@ -22,6 +22,9 @@ interface SearchTabProps {
   handleClearAllSearch: () => void;
   fixedKeywords: string[];
   addFixedKeyword: () => void;
+  addFixedKeywordsList: (list: string) => void;
+  isBulkKeywordsModalOpen: boolean;
+  setIsBulkKeywordsModalOpen: (open: boolean) => void;
   removeFixedKeyword: (kw: string) => void;
   groupedMatches: Record<string, GroupedMatch>;
   navigateKeywordMatch: (query: string, direction: 'next' | 'prev') => void;
@@ -39,6 +42,9 @@ export const SearchTab: React.FC<SearchTabProps> = React.memo(({
   handleClearAllSearch,
   fixedKeywords,
   addFixedKeyword,
+  addFixedKeywordsList,
+  isBulkKeywordsModalOpen,
+  setIsBulkKeywordsModalOpen,
   removeFixedKeyword,
   groupedMatches,
   navigateKeywordMatch,
@@ -157,15 +163,75 @@ export const SearchTab: React.FC<SearchTabProps> = React.memo(({
             );})}
           </div>
           
-          <button 
-            onClick={addFixedKeyword}
-            className="w-full border-2 border-dashed border-neutral-200 dark:border-neutral-800 py-3 rounded-xl text-[10px] font-bold uppercase tracking-widest text-neutral-400 hover:border-blue-500 hover:text-blue-600 transition-all flex items-center justify-center gap-2"
-          >
-            <Plus size={14} />
-            Adicionar Palavra-Chave
-          </button>
+          <div className="grid grid-cols-2 gap-2">
+            <button 
+              onClick={addFixedKeyword}
+              className="border-2 border-dashed border-neutral-200 dark:border-neutral-800 py-3 rounded-xl text-[10px] font-bold uppercase tracking-widest text-neutral-400 hover:border-blue-500 hover:text-blue-600 transition-all flex items-center justify-center gap-2"
+            >
+              <Plus size={14} />
+              Adicionar
+            </button>
+            <button 
+              onClick={() => setIsBulkKeywordsModalOpen(true)}
+              className="border-2 border-dashed border-neutral-200 dark:border-neutral-800 py-3 rounded-xl text-[10px] font-bold uppercase tracking-widest text-neutral-400 hover:border-blue-500 hover:text-blue-600 transition-all flex items-center justify-center gap-2"
+            >
+              <List size={14} />
+              Inserir Lista
+            </button>
+          </div>
         </div>
       </div>
+
+      {/* Bulk Keywords Modal */}
+      {isBulkKeywordsModalOpen && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-white dark:bg-neutral-900 rounded-2xl shadow-2xl w-full max-w-md overflow-hidden border border-neutral-200 dark:border-neutral-800"
+          >
+            <div className="p-6 space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-bold uppercase tracking-widest text-neutral-500">Inserir Lista de Palavras-Chave</h3>
+                <button onClick={() => setIsBulkKeywordsModalOpen(false)} className="text-neutral-400 hover:text-red-500 transition-colors">
+                  <X size={20} />
+                </button>
+              </div>
+              
+              <p className="text-[10px] text-neutral-400 uppercase font-bold tracking-wider">
+                Insira as palavras separadas por vírgula, ponto e vírgula ou nova linha.
+              </p>
+
+              <textarea 
+                id="bulk-keywords-input"
+                className="w-full h-48 bg-neutral-50 dark:bg-neutral-800 rounded-xl p-4 text-sm outline-none border border-neutral-200 dark:border-neutral-700 focus:ring-2 ring-blue-500/20 transition-all resize-none"
+                placeholder="Ex: contrato, cláusula, valor, data..."
+              />
+
+              <div className="flex gap-2 pt-2">
+                <button 
+                  onClick={() => setIsBulkKeywordsModalOpen(false)}
+                  className="flex-1 py-3 rounded-xl text-xs font-bold uppercase tracking-wider text-neutral-500 bg-neutral-100 dark:bg-neutral-800 hover:bg-neutral-200 transition-all"
+                >
+                  Cancelar
+                </button>
+                <button 
+                  onClick={() => {
+                    const input = document.getElementById('bulk-keywords-input') as HTMLTextAreaElement;
+                    if (input) {
+                      addFixedKeywordsList(input.value);
+                      setIsBulkKeywordsModalOpen(false);
+                    }
+                  }}
+                  className="flex-1 py-3 rounded-xl text-xs font-bold uppercase tracking-wider text-white bg-blue-600 hover:bg-blue-700 transition-all shadow-lg shadow-blue-600/20"
+                >
+                  Adicionar Lista
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        </div>
+      )}
 
       <div className="space-y-4 pt-4 border-t border-neutral-100 dark:border-neutral-800">
         <div className="flex justify-between items-center px-1">
