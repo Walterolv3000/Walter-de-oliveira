@@ -330,24 +330,37 @@ const chunkUpload = multer({
   storage: multer.diskStorage({
     destination: (req, file, cb) => {
       const uploadId = req.body.uploadId;
+      if (!uploadId) {
+        return cb(new Error("uploadId is required"), "");
+      }
       const chunkPath = path.join(chunksDir, uploadId);
       if (!fs.existsSync(chunkPath)) fs.mkdirSync(chunkPath, { recursive: true });
       cb(null, chunkPath);
     },
     filename: (req, file, cb) => {
-      cb(null, `chunk-${req.body.chunkIndex}`);
+      const chunkIndex = req.body.chunkIndex;
+      if (chunkIndex === undefined) {
+        return cb(new Error("chunkIndex is required"), "");
+      }
+      cb(null, `chunk-${chunkIndex}`);
     },
   }),
   limits: { fileSize: 10 * 1024 * 1024 }, // 10MB per chunk
 });
 
-app.post("/api/upload/chunk", authenticateToken, chunkUpload.single('chunk'), (req: any, res) => {
-  try {
-    res.json({ success: true, chunkIndex: req.body.chunkIndex });
-  } catch (err: any) {
-    console.error("Chunk upload error:", err);
-    res.status(500).json({ error: err.message });
-  }
+app.post("/api/upload/chunk", authenticateToken, (req: any, res: any, next: any) => {
+  chunkUpload.single('chunk')(req, res, (err: any) => {
+    if (err) {
+      console.error("Multer chunk upload error:", err);
+      return res.status(400).json({ error: err.message });
+    }
+    try {
+      res.json({ success: true, chunkIndex: req.body.chunkIndex });
+    } catch (err: any) {
+      console.error("Chunk upload success handler error:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
 });
 
 app.post("/api/upload/complete", authenticateToken, async (req: any, res) => {

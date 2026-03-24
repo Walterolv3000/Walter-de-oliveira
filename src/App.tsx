@@ -1213,11 +1213,11 @@ export default function App() {
           const chunk = uploadedFile.slice(start, end);
           
           const formData = new FormData();
-          formData.append('chunk', chunk);
           formData.append('chunkIndex', i.toString());
           formData.append('totalChunks', totalChunks.toString());
           formData.append('uploadId', uploadId);
           formData.append('fileName', uploadedFile.name);
+          formData.append('chunk', chunk);
 
           const response = await fetch('/api/upload/chunk', {
             method: 'POST',
