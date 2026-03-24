@@ -1173,7 +1173,7 @@ export default function App() {
       return;
     }
 
-    // Client-side size check (1GB)
+    // Client-side size check (1GB - but we use chunking now)
     if (uploadedFile.size > 1024 * 1024 * 1024) {
       showToast("O arquivo é muito grande (máximo 1GB).", "error");
       return;
@@ -1183,50 +1183,80 @@ export default function App() {
     setUploadProgress(0);
 
     try {
-      const formData = new FormData();
-      formData.append('pdf', uploadedFile);
-
-      // Use fetch instead of XMLHttpRequest for better compatibility with proxy/iframe
-      const response = await fetch('/api/upload', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`
-        },
-        body: formData,
-        // credentials: 'include' is important for iframe cookie support if needed
-        credentials: 'same-origin'
-      });
-
-      const responseText = await response.text();
+      const CHUNK_SIZE = 5 * 1024 * 1024; // 5MB chunks
+      const totalChunks = Math.ceil(uploadedFile.size / CHUNK_SIZE);
+      const uploadId = Math.random().toString(36).substring(2, 15);
       
-      if (!response.ok) {
-        console.error("Upload failed with status:", response.status);
-        
-        if (response.status === 401 || response.status === 403) {
-          handleLogout();
-          throw new Error("Sessão expirada ou acesso negado. Por favor, entre novamente.");
-        }
-
-        if (responseText.includes("<!doctype html>") || responseText.includes("<html")) {
-          console.error("Server returned HTML instead of JSON. Full response (first 500 chars):", responseText.substring(0, 500));
-          throw new Error("O servidor retornou uma página de erro (HTML). Isso pode ser causado por um arquivo muito grande ou tempo limite excedido.");
-        }
-        
-        try {
-          const errorData = JSON.parse(responseText);
-          throw new Error(errorData.error || `Falha no upload: ${response.status}`);
-        } catch (e) {
-          console.error("Failed to parse error response as JSON:", responseText.substring(0, 200));
-          throw new Error(`Falha no upload: ${response.status}`);
-        }
-      }
-
       let data;
-      try {
+
+      // If file is small, use standard upload
+      if (uploadedFile.size <= CHUNK_SIZE) {
+        const formData = new FormData();
+        formData.append('pdf', uploadedFile);
+
+        const response = await fetch('/api/upload', {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${token}` },
+          body: formData,
+          credentials: 'same-origin'
+        });
+
+        const responseText = await response.text();
+        if (!response.ok) throw new Error(responseText || `Falha no upload: ${response.status}`);
         data = JSON.parse(responseText);
-      } catch (e) {
-        console.error("Failed to parse success response as JSON. Full response (first 500 chars):", responseText.substring(0, 500));
-        throw new Error("O servidor retornou uma resposta inválida. Tente novamente.");
+        setUploadProgress(100);
+      } else {
+        // Chunked upload for larger files
+        for (let i = 0; i < totalChunks; i++) {
+          const start = i * CHUNK_SIZE;
+          const end = Math.min(start + CHUNK_SIZE, uploadedFile.size);
+          const chunk = uploadedFile.slice(start, end);
+          
+          const formData = new FormData();
+          formData.append('chunk', chunk);
+          formData.append('chunkIndex', i.toString());
+          formData.append('totalChunks', totalChunks.toString());
+          formData.append('uploadId', uploadId);
+          formData.append('fileName', uploadedFile.name);
+
+          const response = await fetch('/api/upload/chunk', {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${token}` },
+            body: formData,
+            credentials: 'same-origin'
+          });
+
+          if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`Erro no envio da parte ${i + 1}: ${errorText}`);
+          }
+          
+          setUploadProgress(Math.round(((i + 1) / totalChunks) * 90));
+        }
+
+        // Complete the upload
+        const completeResponse = await fetch('/api/upload/complete', {
+          method: 'POST',
+          headers: { 
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            uploadId,
+            fileName: uploadedFile.name,
+            totalChunks,
+            fileSize: uploadedFile.size
+          }),
+          credentials: 'same-origin'
+        });
+
+        if (!completeResponse.ok) {
+          const errorText = await completeResponse.text();
+          throw new Error(`Erro ao finalizar upload: ${errorText}`);
+        }
+        
+        data = await completeResponse.json();
+        setUploadProgress(100);
       }
       
       // Reset state for new document

@@ -243,8 +243,8 @@ const authLimiter = rateLimit({
 
 app.use("/api/auth/", authLimiter);
 
-app.use(express.json({ limit: '1024mb' }));
-app.use(express.urlencoded({ limit: '1024mb', extended: true }));
+app.use(express.json({ limit: '32mb' }));
+app.use(express.urlencoded({ limit: '32mb', extended: true }));
 
 interface AuthRequest extends express.Request {
   user?: any;
@@ -287,11 +287,17 @@ app.use((req, res, next) => {
   next();
 });
 
-// Ensure uploads directory exists
+// Ensure uploads and chunks directory exists
 const uploadsDir = process.env.VERCEL ? "/tmp/uploads" : path.join(process.cwd(), "uploads");
+const chunksDir = process.env.VERCEL ? "/tmp/chunks" : path.join(process.cwd(), "chunks");
+
 if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
   console.log(`Created uploads directory at ${uploadsDir}`);
+}
+if (!fs.existsSync(chunksDir)) {
+  fs.mkdirSync(chunksDir, { recursive: true });
+  console.log(`Created chunks directory at ${chunksDir}`);
 }
 
 // Multer config
@@ -311,12 +317,96 @@ const storage = multer.diskStorage({
 
 const upload = multer({
   storage,
-  limits: { fileSize: 1024 * 1024 * 1024 }, // 1GB
+  limits: { fileSize: 32 * 1024 * 1024 }, // 32MB (Cloud Run limit)
 });
 
 // API Routes
 app.get("/api/health", (req, res) => {
   res.json({ status: "ok", time: new Date().toISOString() });
+});
+
+// Chunked Upload Endpoints
+const chunkUpload = multer({
+  storage: multer.diskStorage({
+    destination: (req, file, cb) => {
+      const uploadId = req.body.uploadId;
+      const chunkPath = path.join(chunksDir, uploadId);
+      if (!fs.existsSync(chunkPath)) fs.mkdirSync(chunkPath, { recursive: true });
+      cb(null, chunkPath);
+    },
+    filename: (req, file, cb) => {
+      cb(null, `chunk-${req.body.chunkIndex}`);
+    },
+  }),
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB per chunk
+});
+
+app.post("/api/upload/chunk", authenticateToken, chunkUpload.single('chunk'), (req: any, res) => {
+  try {
+    res.json({ success: true, chunkIndex: req.body.chunkIndex });
+  } catch (err: any) {
+    console.error("Chunk upload error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/api/upload/complete", authenticateToken, async (req: any, res) => {
+  const { uploadId, fileName, totalChunks, fileSize } = req.body;
+  const userId = req.user.id;
+  
+  try {
+    const chunkPath = path.join(chunksDir, uploadId);
+    const id = uuidv4();
+    const safeName = fileName.replace(/[^a-z0-9.]/gi, '_').toLowerCase();
+    const extension = path.extname(fileName).toLowerCase() || '.pdf';
+    const finalName = safeName.endsWith(extension) ? safeName : `${safeName}${extension}`;
+    const destPath = path.join(uploadsDir, `${id}-${finalName}`);
+    
+    const writeStream = fs.createWriteStream(destPath);
+    
+    for (let i = 0; i < totalChunks; i++) {
+      const chunkFilePath = path.join(chunkPath, `chunk-${i}`);
+      if (!fs.existsSync(chunkFilePath)) {
+        throw new Error(`Chunk ${i} missing`);
+      }
+      const chunkData = fs.readFileSync(chunkFilePath);
+      writeStream.write(chunkData);
+      fs.unlinkSync(chunkFilePath); // Delete chunk after writing
+    }
+    
+    writeStream.end();
+    
+    // Wait for write stream to finish
+    await new Promise<void>((resolve, reject) => {
+      writeStream.on('finish', () => resolve());
+      writeStream.on('error', (err) => reject(err));
+    });
+    
+    // Clean up chunk directory
+    fs.rmdirSync(chunkPath);
+    
+    const newDoc = {
+      id,
+      name: fileName,
+      path: `${id}-${finalName}`,
+      size: parseInt(fileSize),
+      user_id: userId,
+      created_at: new Date().toISOString()
+    };
+
+    if (isSupabaseConfigured) {
+      const { error } = await supabase.from('documents').insert([newDoc]);
+      if (error) throw error;
+    } else {
+      db.documents.push(newDoc);
+      saveDB();
+    }
+
+    res.json({ id, name: fileName, size: fileSize });
+  } catch (err: any) {
+    console.error("Upload completion error:", err);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 app.get("/api/upload", (req, res) => {
