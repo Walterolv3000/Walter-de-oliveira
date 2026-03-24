@@ -1172,9 +1172,9 @@ export default function App() {
       return;
     }
 
-    // Client-side size check (500MB)
-    if (uploadedFile.size > 500 * 1024 * 1024) {
-      showToast("O arquivo é muito grande (máximo 500MB).", "error");
+    // Client-side size check (1GB)
+    if (uploadedFile.size > 1024 * 1024 * 1024) {
+      showToast("O arquivo é muito grande (máximo 1GB).", "error");
       return;
     }
 

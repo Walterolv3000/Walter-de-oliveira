@@ -243,8 +243,8 @@ const authLimiter = rateLimit({
 
 app.use("/api/auth/", authLimiter);
 
-app.use(express.json({ limit: '500mb' }));
-app.use(express.urlencoded({ limit: '500mb', extended: true }));
+app.use(express.json({ limit: '1024mb' }));
+app.use(express.urlencoded({ limit: '1024mb', extended: true }));
 
 interface AuthRequest extends express.Request {
   user?: any;
@@ -311,7 +311,7 @@ const storage = multer.diskStorage({
 
 const upload = multer({
   storage,
-  limits: { fileSize: 500 * 1024 * 1024 }, // 500MB
+  limits: { fileSize: 1024 * 1024 * 1024 }, // 1GB
 });
 
 // API Routes
@@ -333,7 +333,7 @@ app.post(["/api/upload", "/api/upload/"], authenticateToken, (req, res, next) =>
     if (err instanceof multer.MulterError) {
       console.error("Multer error:", err);
       if (err.code === 'LIMIT_FILE_SIZE') {
-        return res.status(400).json({ error: "Arquivo muito grande. O limite é 500MB." });
+        return res.status(400).json({ error: "Arquivo muito grande. O limite é 1GB." });
       }
       return res.status(400).json({ error: `Erro no upload: ${err.message}` });
     } else if (err) {
