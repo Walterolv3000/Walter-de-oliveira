@@ -26,6 +26,7 @@ interface SearchTabProps {
   isBulkKeywordsModalOpen: boolean;
   setIsBulkKeywordsModalOpen: (open: boolean) => void;
   removeFixedKeyword: (kw: string) => void;
+  removeNotFoundKeywords: () => void;
   groupedMatches: Record<string, GroupedMatch>;
   navigateKeywordMatch: (query: string, direction: 'next' | 'prev') => void;
   setCurrentPage: (p: number) => void;
@@ -46,6 +47,7 @@ export const SearchTab: React.FC<SearchTabProps> = React.memo(({
   isBulkKeywordsModalOpen,
   setIsBulkKeywordsModalOpen,
   removeFixedKeyword,
+  removeNotFoundKeywords,
   groupedMatches,
   navigateKeywordMatch,
   setCurrentPage,
@@ -130,6 +132,14 @@ export const SearchTab: React.FC<SearchTabProps> = React.memo(({
         <div className="space-y-2">
           <div className="flex items-center justify-between px-1">
             <span className="text-[10px] font-bold text-neutral-400 uppercase tracking-wider">Palavras-Chave Fixas</span>
+            <button 
+              onClick={removeNotFoundKeywords}
+              className="text-[10px] font-bold text-red-500 uppercase tracking-wider hover:text-red-600 transition-colors flex items-center gap-1"
+              title="Remover palavras que não foram encontradas no documento"
+            >
+              <X size={10} />
+              Limpar Não Encontradas
+            </button>
           </div>
           <div className="flex flex-wrap gap-2">
             {(fixedKeywords || []).map((kw, i) => {

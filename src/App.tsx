@@ -1669,6 +1669,16 @@ export default function App() {
     setFixedKeywords(fixedKeywords.filter(k => k !== kw));
   };
 
+  const removeNotFoundKeywords = () => {
+    const newKeywords = fixedKeywords.filter(kw => {
+      const hasMatches = (groupedMatches[kw]?.matches || []).length > 0;
+      const searched = groupedMatches[kw] !== undefined;
+      return !searched || hasMatches;
+    });
+    setFixedKeywords(newKeywords);
+    showToast("Palavras não encontradas removidas");
+  };
+
   const navigateKeywordMatch = (query: string, direction: 'next' | 'prev') => {
     const group = groupedMatches[query];
     if (!group || (group.matches || []).length === 0) return;
@@ -2816,6 +2826,7 @@ export default function App() {
                     isBulkKeywordsModalOpen={isBulkKeywordsModalOpen}
                     setIsBulkKeywordsModalOpen={setIsBulkKeywordsModalOpen}
                     removeFixedKeyword={removeFixedKeyword}
+                    removeNotFoundKeywords={removeNotFoundKeywords}
                     groupedMatches={groupedMatches}
                     navigateKeywordMatch={navigateKeywordMatch}
                     setCurrentPage={setCurrentPage}
