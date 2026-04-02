@@ -88,7 +88,7 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({
         
         const loadingTask = pdfjsLib.getDocument({
           url: finalUrl,
-          httpHeaders: token ? { 'Authorization': `Bearer ${token}` } : undefined,
+          httpHeaders: (token && !finalUrl.startsWith('blob:')) ? { 'Authorization': `Bearer ${token}` } : undefined,
           withCredentials: true, // Important for some proxy setups
           cMapUrl: `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/cmaps/`,
           cMapPacked: true,

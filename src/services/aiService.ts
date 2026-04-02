@@ -87,10 +87,12 @@ export async function analyzeDocument(
   text: string, 
   apiKey?: string, 
   prompt?: string, 
-  provider: AIProvider = 'gemini'
+  provider: AIProvider = 'gemini',
+  pdfData?: string // Base64 encoded PDF
 ) {
-  const systemPrompt = `Analyze the following document text and provide a structured JSON response. 
+  const systemPrompt = `Analyze the following document and provide a structured JSON response. 
     Focus on extracting specific events, companies, and relevant data points.
+    If you have access to the visual document (PDF/Image), use it to understand the layout, tables, and context better.
     
     The response must include:
     - summary: A brief general summary.
@@ -110,10 +112,7 @@ export async function analyzeDocument(
         - portaria_ato: The number of the Portaria or Act, if available.
         - page: The page number where this was found, if available.
 
-    ${prompt ? `Additional Instructions: ${prompt}` : ''}
-
-    Document Text:
-    ${text.substring(0, 30000)}`;
+    ${prompt ? `Additional Instructions: ${prompt}` : ''}`;
 
   const schema = {
     type: "object",
@@ -148,21 +147,37 @@ export async function analyzeDocument(
 
   if (provider === 'kimi') {
     if (!apiKey) throw new Error("Kimi API Key is required");
-    const result = await callKimi(systemPrompt, apiKey, schema);
+    const result = await callKimi(`${systemPrompt}\n\nDocument Text:\n${text.substring(0, 100000)}`, apiKey, schema);
     return safeJsonParse(result);
   }
 
   if (provider === 'openai') {
     if (!apiKey) throw new Error("OpenAI API Key is required");
-    const result = await callOpenAI(systemPrompt, apiKey, schema);
+    const result = await callOpenAI(`${systemPrompt}\n\nDocument Text:\n${text.substring(0, 100000)}`, apiKey, schema);
     return safeJsonParse(result);
   }
 
   // Default to Gemini
   const ai = new GoogleGenAI({ apiKey: apiKey || process.env.GEMINI_API_KEY || "" });
+  
+  const contents: any[] = [
+    { text: systemPrompt }
+  ];
+
+  if (pdfData) {
+    contents.push({
+      inlineData: {
+        mimeType: "application/pdf",
+        data: pdfData
+      }
+    });
+  } else {
+    contents.push({ text: `Document Text:\n${text.substring(0, 200000)}` });
+  }
+
   const response = await ai.models.generateContent({
     model: "gemini-3.1-pro-preview",
-    contents: systemPrompt,
+    contents: { parts: contents },
     config: {
       responseMimeType: "application/json",
       responseSchema: {
@@ -207,31 +222,48 @@ export async function chatWithDocument(
   history: { role: string, content: string }[], 
   apiKey?: string, 
   prompt?: string,
-  provider: AIProvider = 'gemini'
+  provider: AIProvider = 'gemini',
+  pdfData?: string // Base64 encoded PDF
 ) {
-  const systemInstruction = `${prompt || "You are an expert document analyzer. Use the provided document text to answer the user's questions accurately. If the information is not in the document, say so."}
-      
-      Document Content:
-      ${text.substring(0, 30000)}`;
+  const systemInstruction = `${prompt || "You are an expert document analyzer. Use the provided document to answer the user's questions accurately. If the information is not in the document, say so."}`;
 
   if (provider === 'kimi') {
     if (!apiKey) throw new Error("Kimi API Key is required");
-    const fullPrompt = `System: ${systemInstruction}\n\nUser: ${question}`;
+    const fullPrompt = `System: ${systemInstruction}\n\nDocument Content:\n${text.substring(0, 100000)}\n\nUser: ${question}`;
     return await callKimi(fullPrompt, apiKey);
   }
 
   const ai = new GoogleGenAI({ apiKey: apiKey || process.env.GEMINI_API_KEY || "" });
+  
+  const historyParts = (history || []).map(msg => ({
+    role: msg.role === 'user' ? 'user' : 'model',
+    parts: [{ text: msg.content }]
+  }));
+
+  // For Gemini, we can include the PDF in the first message if it's a new chat
+  // or just use the text context.
   const chat = ai.chats.create({
     model: "gemini-3.1-flash-lite-preview",
     config: {
       systemInstruction,
     },
-    history: (history || []).map(msg => ({
-      role: msg.role === 'user' ? 'user' : 'model',
-      parts: [{ text: msg.content }]
-    }))
+    history: historyParts
   });
 
-  const response = await chat.sendMessage({ message: question });
+  const messageParts: any[] = [];
+  if (pdfData && historyParts.length === 0) {
+    messageParts.push({
+      inlineData: {
+        mimeType: "application/pdf",
+        data: pdfData
+      }
+    });
+  } else if (!pdfData && historyParts.length === 0) {
+    messageParts.push({ text: `Document Content:\n${text.substring(0, 200000)}` });
+  }
+  
+  messageParts.push({ text: question });
+
+  const response = await chat.sendMessage({ message: messageParts });
   return response.text;
 }

@@ -4,7 +4,7 @@ import {
   ZoomIn, ZoomOut, Download, Printer,
   Send, Loader2, Menu, X, Sun, Moon, Highlighter, EyeOff, Eye,
   ChevronUp, ChevronDown, Settings, Plus, Trash2, Check, Eraser,
-  ArrowUpDown, MoreVertical, Filter, PanelRightOpen, PanelRightClose, PanelRight, PanelLeft,
+  ArrowUpDown, MoreVertical, Filter, PanelRightOpen, PanelRightClose, PanelRight,
   LayoutList, Copy, Pencil, RotateCcw
 } from 'lucide-react';
 import * as pdfjsLib from 'pdfjs-dist';
@@ -26,6 +26,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Login } from './components/Login';
 import { AdminDashboard } from './components/AdminDashboard';
 import { LogOut, ShieldCheck } from 'lucide-react';
+import { saveLocalDocument, getLocalDocument, deleteLocalDocument, updateLocalDocument, getAllLocalDocuments } from './lib/indexedDB';
 
 const DEFAULT_PROMPTS = [
   { id: 'padrão', name: 'Padrão', prompt: 'Você é um especialista em análise de documentos. Extraia informações relevantes, identifique empresas, datas e eventos importantes. Seja preciso e detalhado.', isDefault: true },
@@ -135,13 +136,58 @@ export default function App() {
 
   const [file, setFile] = useState<File | null>(null);
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
+
+  // Cleanup Blob URLs to prevent memory leaks
+  useEffect(() => {
+    return () => {
+      if (pdfUrl && pdfUrl.startsWith('blob:')) {
+        URL.revokeObjectURL(pdfUrl);
+      }
+    };
+  }, [pdfUrl]);
   const [docId, setDocId] = useState<string | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [pageInputValue, setPageInputValue] = useState("1");
   const [zoom, setZoom] = useState(1.0);
   const [thumbnails, setThumbnails] = useState<string[]>([]);
   const [fullText, setFullText] = useState("");
+  const [pdfBase64, setPdfBase64] = useState<string | null>(null);
   const pages = useMemo(() => fullText.split(/--- Page \d+ ---/), [fullText]);
+  useEffect(() => {
+    const fetchPdfBase64 = async () => {
+      if (!pdfUrl) {
+        setPdfBase64(null);
+        return;
+      }
+      try {
+        let blob: Blob;
+        if (pdfUrl.startsWith('blob:') && file) {
+          blob = file;
+        } else {
+          const response = await fetch(pdfUrl, {
+            headers: (token && !pdfUrl.startsWith('blob:')) ? { 'Authorization': `Bearer ${token}` } : {}
+          });
+          if (!response.ok) {
+            throw new Error(`Falha ao buscar PDF para análise: ${response.status} ${response.statusText}`);
+          }
+          blob = await response.blob();
+        }
+        
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          const base64String = reader.result as string;
+          // Strip the data:application/pdf;base64, prefix
+          const base64Data = base64String.split(',')[1];
+          setPdfBase64(base64Data);
+        };
+        reader.readAsDataURL(blob);
+      } catch (err) {
+        console.error("Error fetching PDF for AI analysis:", err);
+      }
+    };
+    fetchPdfBase64();
+  }, [pdfUrl, token, file]);
+
   const [isDarkMode, setIsDarkMode] = useState(() => {
     if (typeof window !== 'undefined') {
       const saved = localStorage.getItem('theme');
@@ -163,14 +209,14 @@ export default function App() {
   
   // Panels
   const [activeTab, setActiveTab] = useState<'search' | 'ai' | 'history'>('search');
-  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isRightPanelOpen, setIsRightPanelOpen] = useState(true);
-  const [sidebarWidth, setSidebarWidth] = useState(280);
+  const [sidebarWidth, setSidebarWidth] = useState(0);
   const [rightPanelWidth, setRightPanelWidth] = useState(350);
   const [isResizingLeft, setIsResizingLeft] = useState(false);
   const [isResizingRight, setIsResizingRight] = useState(false);
 
-  const toggleLeftSidebar = () => setIsSidebarOpen(!isSidebarOpen);
+  const toggleLeftSidebar = () => setIsSidebarOpen(false);
   const toggleRightSidebar = () => setIsRightPanelOpen(!isRightPanelOpen);
 
   const startResizingLeft = useCallback((e: React.MouseEvent) => {
@@ -241,6 +287,44 @@ export default function App() {
   const [userInput, setUserInput] = useState("");
   const [isChatLoading, setIsChatLoading] = useState(false);
   
+  // PWA Install
+  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+  const [showInstallButton, setShowInstallButton] = useState(false);
+
+  useEffect(() => {
+    const handleBeforeInstallPrompt = (e: any) => {
+      // Prevent Chrome 67 and earlier from automatically showing the prompt
+      e.preventDefault();
+      // Stash the event so it can be triggered later.
+      setDeferredPrompt(e);
+      setShowInstallButton(true);
+    };
+
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+
+    window.addEventListener('appinstalled', () => {
+      setShowInstallButton(false);
+      setDeferredPrompt(null);
+      console.log('PWA was installed');
+    });
+
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    };
+  }, []);
+
+  const handleInstallClick = async () => {
+    if (!deferredPrompt) return;
+    // Show the prompt
+    deferredPrompt.prompt();
+    // Wait for the user to respond to the prompt
+    const { outcome } = await deferredPrompt.userChoice;
+    console.log(`User response to the install prompt: ${outcome}`);
+    // We've used the prompt, and can't use it again, throw it away
+    setDeferredPrompt(null);
+    setShowInstallButton(false);
+  };
+  
   // Detailed Analysis
   const [isDetailedAnalysisOpen, setIsDetailedAnalysisOpen] = useState(false);
   const [isBulkKeywordsModalOpen, setIsBulkKeywordsModalOpen] = useState(false);
@@ -290,6 +374,8 @@ export default function App() {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [chatMessages]);
   const [isReaderMode, setIsReaderMode] = useState(false);
+  const [showLanding, setShowLanding] = useState(false);
+  const [isGuestLoading, setIsGuestLoading] = useState(false);
   const [readerPage, setReaderPage] = useState<number | undefined>(undefined);
   const [selectedFinding, setSelectedFinding] = useState<any>(null);
 
@@ -487,6 +573,28 @@ export default function App() {
     setIsAdminView(false);
     localStorage.removeItem('auth_token');
     showToast("Você saiu do sistema.");
+  };
+
+  const handleGuestLogin = async () => {
+    setIsGuestLoading(true);
+    try {
+      const response = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: 'convidado@pdfmaster.ai', password: 'Convidado@2026' }),
+      });
+      const data = await response.json();
+      if (response.ok) {
+        handleLogin(data.token, data.user);
+        setShowLanding(false);
+      } else {
+        showToast(data.error || 'Falha no acesso rápido.', 'error');
+      }
+    } catch (err) {
+      showToast('Erro de conexão.', 'error');
+    } finally {
+      setIsGuestLoading(false);
+    }
   };
 
   useEffect(() => {
@@ -907,6 +1015,44 @@ export default function App() {
   const [isDragging, setIsDragging] = useState(false);
 
   const [recentDocuments, setRecentDocuments] = useState<{ id: string, name: string, created_at: string }[]>([]);
+  const [localDocuments, setLocalDocuments] = useState<any[]>([]);
+
+  // Load local documents from IndexedDB on mount
+  useEffect(() => {
+    const loadLocalDocs = async () => {
+      try {
+        const docs = await getAllLocalDocuments();
+        setLocalDocuments(docs.sort((a, b) => 
+          new Date(b.last_accessed).getTime() - new Date(a.last_accessed).getTime()
+        ));
+      } catch (err) {
+        console.error("Error loading local documents:", err);
+      }
+    };
+    loadLocalDocs();
+  }, []);
+
+  const mergedDocuments = useMemo(() => {
+    const serverDocs = recentDocuments || [];
+    const localDocs = localDocuments || [];
+    
+    // Create a map to avoid duplicates, prioritizing local docs for the "last accessed" time
+    const docMap = new Map();
+    
+    serverDocs.forEach(doc => {
+      docMap.set(doc.id, { ...doc, source: 'server' });
+    });
+    
+    localDocs.forEach(doc => {
+      docMap.set(doc.id, { ...doc, source: 'local' });
+    });
+    
+    return Array.from(docMap.values()).sort((a, b) => {
+      const dateA = new Date(a.last_accessed || a.created_at).getTime();
+      const dateB = new Date(b.last_accessed || b.created_at).getTime();
+      return dateB - dateA;
+    });
+  }, [recentDocuments, localDocuments]);
 
   useEffect(() => {
     const fetchRecentDocs = async () => {
@@ -935,6 +1081,30 @@ export default function App() {
   const handleOpenRecent = async (doc: { id: string, name: string }) => {
     setIsUploading(true);
     try {
+      // Try to load from IndexedDB first for fast local loading
+      const localDoc = await getLocalDocument(doc.id);
+      if (localDoc) {
+        console.log("Loading document from local IndexedDB");
+        const localUrl = URL.createObjectURL(localDoc.blob);
+        setPdfUrl(localUrl);
+        setFile(localDoc.blob as File);
+        setDocId(doc.id);
+        setDocName(doc.name);
+        setAiAnalysis(localDoc.analysis || null);
+        setFullText(localDoc.text || "");
+        setChatMessages([]);
+        setSearchResults([]);
+        setEdits([]);
+        setCurrentPage(1);
+        
+        // Even if we found it locally, we might want to refresh analysis/annotations from server
+        // but we can do it in the background or skip it if we have it locally
+        if (localDoc.analysis) {
+          setIsUploading(false);
+          return;
+        }
+      }
+
       setPdfUrl(`/api/documents/${doc.id}/pdf`);
       setDocId(doc.id);
       setDocName(doc.name);
@@ -1165,17 +1335,28 @@ export default function App() {
 
     if (!uploadedFile) return;
 
+    // Create a local URL for immediate preview from the PC
+    const localUrl = URL.createObjectURL(uploadedFile);
+    setPdfUrl(localUrl);
+    setDocName(uploadedFile.name);
+    setFile(uploadedFile);
+    setCurrentPage(1);
+    setFullText("");
+    setChatMessages([]);
+    setSearchResults([]);
+    setEdits([]);
+    setAiAnalysis(null);
+
     // Check if it's a PDF by extension if type is missing
     const isPdf = uploadedFile.type === 'application/pdf' || uploadedFile.name.toLowerCase().endsWith('.pdf');
+    const isImage = uploadedFile.type.startsWith('image/') || /\.(jpg|jpeg|png|gif|webp)$/i.test(uploadedFile.name);
 
-    if (!isPdf) {
-      showToast("Por favor, selecione apenas arquivos PDF.", "error");
-      return;
-    }
+    // Allow any file as requested by user, but we'll prioritize PDF and Image for preview
+    const isSupported = isPdf || isImage || true; // Always true now as requested
 
-    // Client-side size check (1GB - but we use chunking now)
-    if (uploadedFile.size > 1024 * 1024 * 1024) {
-      showToast("O arquivo é muito grande (máximo 1GB).", "error");
+    // Client-side size check (4GB - but we use chunking now)
+    if (uploadedFile.size > 4 * 1024 * 1024 * 1024) {
+      showToast("O arquivo é muito grande (máximo 4GB).", "error");
       return;
     }
 
@@ -1183,7 +1364,7 @@ export default function App() {
     setUploadProgress(0);
 
     try {
-      const CHUNK_SIZE = 5 * 1024 * 1024; // 5MB chunks
+      const CHUNK_SIZE = 20 * 1024 * 1024; // 20MB chunks
       const totalChunks = Math.ceil(uploadedFile.size / CHUNK_SIZE);
       const uploadId = Math.random().toString(36).substring(2, 15);
       
@@ -1202,8 +1383,27 @@ export default function App() {
         });
 
         const responseText = await response.text();
-        if (!response.ok) throw new Error(responseText || `Falha no upload: ${response.status}`);
-        data = JSON.parse(responseText);
+        if (!response.ok) {
+          let errorMessage = `Falha no upload: ${response.status}`;
+          try {
+            const errorData = JSON.parse(responseText);
+            errorMessage = errorData.error || errorMessage;
+          } catch (e) {
+            // If not JSON, check if it's HTML (likely a 404/500 page)
+            if (responseText.includes('<!doctype') || responseText.includes('<html')) {
+              errorMessage = "Erro no servidor (página HTML retornada). Verifique as rotas da API.";
+            } else {
+              errorMessage = responseText || errorMessage;
+            }
+          }
+          throw new Error(errorMessage);
+        }
+        
+        try {
+          data = JSON.parse(responseText);
+        } catch (e) {
+          throw new Error("Resposta do servidor inválida (não é JSON).");
+        }
         setUploadProgress(100);
       } else {
         // Chunked upload for larger files
@@ -1226,9 +1426,20 @@ export default function App() {
             credentials: 'same-origin'
           });
 
+          const responseText = await response.text();
           if (!response.ok) {
-            const errorText = await response.text();
-            throw new Error(`Erro no envio da parte ${i + 1}: ${errorText}`);
+            let errorMessage = `Falha no envio da parte ${i + 1}: ${response.status}`;
+            try {
+              const errorData = JSON.parse(responseText);
+              errorMessage = errorData.error || errorMessage;
+            } catch (e) {
+              if (responseText.includes('<!doctype') || responseText.includes('<html')) {
+                errorMessage = "Erro no servidor (página HTML retornada). Verifique as rotas da API.";
+              } else {
+                errorMessage = responseText || errorMessage;
+              }
+            }
+            throw new Error(errorMessage);
           }
           
           setUploadProgress(Math.round(((i + 1) / totalChunks) * 90));
@@ -1250,12 +1461,27 @@ export default function App() {
           credentials: 'same-origin'
         });
 
+        const completeResponseText = await completeResponse.text();
         if (!completeResponse.ok) {
-          const errorText = await completeResponse.text();
-          throw new Error(`Erro ao finalizar upload: ${errorText}`);
+          let errorMessage = `Erro ao finalizar upload: ${completeResponse.status}`;
+          try {
+            const errorData = JSON.parse(completeResponseText);
+            errorMessage = errorData.error || errorMessage;
+          } catch (e) {
+            if (completeResponseText.includes('<!doctype') || completeResponseText.includes('<html')) {
+              errorMessage = "Erro no servidor ao finalizar (página HTML retornada).";
+            } else {
+              errorMessage = completeResponseText || errorMessage;
+            }
+          }
+          throw new Error(errorMessage);
         }
         
-        data = await completeResponse.json();
+        try {
+          data = JSON.parse(completeResponseText);
+        } catch (e) {
+          throw new Error("Resposta de finalização inválida (não é JSON).");
+        }
         setUploadProgress(100);
       }
       
@@ -1267,10 +1493,20 @@ export default function App() {
       setEdits([]);
       setCurrentPage(1);
       
-      setFile(uploadedFile);
-      setDocName(uploadedFile.name);
-      setPdfUrl(`/api/documents/${data.id}/pdf`);
       setDocId(data.id);
+      
+      // Save to IndexedDB for local indexing and fast loading
+      try {
+        await saveLocalDocument({
+          id: data.id,
+          name: uploadedFile.name,
+          blob: uploadedFile,
+          last_accessed: new Date().toISOString()
+        });
+        console.log("Document saved to local IndexedDB");
+      } catch (dbErr) {
+        console.error("Error saving to IndexedDB:", dbErr);
+      }
       
       // Reset input value to allow selecting the same file again
       const fileInput = document.getElementById('pdf-upload-input') as HTMLInputElement;
@@ -1519,9 +1755,19 @@ export default function App() {
     }
     setIsAiAnalyzing(true);
     try {
-      const analysis = await analyzeDocument(fullText, currentApiKey, aiFixedPrompt, currentProvider);
+      const analysis = await analyzeDocument(fullText, currentApiKey, aiFixedPrompt, currentProvider, pdfBase64 || undefined);
       setAiAnalysis(analysis);
       setActiveTab('ai');
+      
+      // Save analysis to local IndexedDB for fast retrieval
+      if (docId) {
+        try {
+          await updateLocalDocument(docId, { analysis });
+          console.log("Analysis saved to local IndexedDB");
+        } catch (dbErr) {
+          console.error("Error saving analysis to IndexedDB:", dbErr);
+        }
+      }
       
       // Save analysis to server
       if (docId) {
@@ -1558,7 +1804,8 @@ export default function App() {
         newMessages,
         currentApiKey,
         aiFixedPrompt,
-        currentProvider
+        currentProvider,
+        pdfBase64 || undefined
       );
       setChatMessages([...newMessages, { role: 'model', content: response || "" }]);
     } catch (err) {
@@ -1864,78 +2111,16 @@ export default function App() {
         onClose={() => setToast({ ...toast, isVisible: false })}
       />
 
-      {/* Left Sidebar: Thumbnails */}
-      <div 
-        id="left-sidebar"
-        className={cn(
-          "sidebar left flex flex-col z-[60] relative transition-all duration-300 ease-in-out",
-          !isSidebarOpen && "hidden-left",
-          isMobile && "fixed inset-y-0 left-0 shadow-2xl"
-        )}
-        style={{ width: isSidebarOpen ? sidebarWidth : 0 }}
-      >
-        <div className="p-4 border-b border-neutral-100 dark:border-neutral-800 flex items-center justify-between min-w-[200px] bg-white dark:bg-neutral-900 sticky top-0 z-10">
-          <div className="flex items-center gap-2">
-            <h2 className="font-black text-[10px] uppercase tracking-[0.2em] text-neutral-400">PÁGINAS</h2>
-            <span className="text-[10px] font-bold text-neutral-400">{(thumbnails || []).length}</span>
-          </div>
-          <button 
-            onClick={toggleLeftSidebar}
-            className="p-1.5 hover:bg-neutral-100 dark:hover:bg-neutral-800 rounded-lg text-neutral-400 lg:hidden"
-          >
-            <X size={16} />
-          </button>
-        </div>
-        <div className="flex-1 overflow-y-auto p-4 space-y-8">
-          {(thumbnails || []).map((thumb, i) => (
-            <div 
-              key={i} 
-              className="flex flex-col items-center gap-2"
-            >
-              <button
-                onClick={() => setCurrentPage(i + 1)}
-                className={cn(
-                  "w-full aspect-[3/4] rounded-lg border-2 transition-all overflow-hidden shadow-sm flex items-center justify-center bg-neutral-100 dark:bg-neutral-800",
-                  currentPage === i + 1 ? "border-blue-600 ring-4 ring-blue-500/10" : "border-transparent hover:border-neutral-300"
-                )}
-              >
-                {thumb ? (
-                  <img src={thumb} alt={`Page ${i + 1}`} className="w-full h-full object-cover" />
-                ) : (
-                  <div className="flex flex-col items-center gap-1">
-                    <FileText size={20} className="text-neutral-300" />
-                    <span className="text-[8px] font-bold text-neutral-400">PÁG {i + 1}</span>
-                  </div>
-                )}
-              </button>
-              <span className="text-[10px] font-bold text-neutral-400">{i + 1}</span>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Left Resize Handle */}
-      {isSidebarOpen && !isMobile && (
-        <div
-          onMouseDown={startResizingLeft}
-          className="w-1 hover:w-1.5 bg-transparent hover:bg-blue-500/30 cursor-col-resize z-[70] transition-all"
-        />
-      )}
-
+      {/* Left Sidebar: Thumbnails - REMOVED */}
+      
+      {/* Left Resize Handle - REMOVED */}
+      
       {/* Main Content */}
       <main className="flex-1 flex flex-col relative min-w-0">
         {/* Toolbar */}
         <header className="h-14 border-b border-neutral-200 dark:border-neutral-800 flex items-center justify-between px-4 bg-white dark:bg-neutral-900 z-30 relative">
           {/* Left & Center Section Grouped */}
           <div className="flex items-center gap-3">
-            <button 
-              onClick={toggleLeftSidebar}
-              className={cn("p-2 rounded-lg transition-colors", isSidebarOpen ? "text-blue-600 bg-blue-50" : "text-neutral-500 hover:bg-neutral-100")}
-              title={isSidebarOpen ? "Ocultar Páginas" : "Mostrar Páginas"}
-            >
-              <PanelLeft size={20} />
-            </button>
-
             <button 
               onClick={() => {
                 if (!isRightPanelOpen) setIsRightPanelOpen(true);
@@ -2006,6 +2191,17 @@ export default function App() {
 
           {/* Right Section */}
           <div className="flex items-center gap-1">
+            {showInstallButton && (
+              <button 
+                onClick={handleInstallClick}
+                className="p-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-all shadow-lg shadow-blue-500/20 flex items-center gap-2 mr-2"
+                title="Instalar Aplicativo no Computador"
+              >
+                <Download size={18} />
+                <span className="text-[10px] font-black uppercase tracking-widest hidden xl:inline">Instalar App</span>
+              </button>
+            )}
+
             <div className="h-6 w-px bg-neutral-200 dark:bg-neutral-800 mx-1" />
 
             <div className="flex items-center gap-1 bg-neutral-100 dark:bg-neutral-800 p-1 rounded-xl">
@@ -2221,11 +2417,11 @@ export default function App() {
                   <div className="flex items-center gap-2"><Highlighter size={14} /> Destaque</div>
                 </div>
 
-                {(recentDocuments || []).length > 0 && (
+                {(mergedDocuments || []).length > 0 && (
                     <div className="mt-12 w-full max-w-md">
                       <div className="flex items-center justify-between mb-4">
                         <h3 className="text-[10px] font-black uppercase text-neutral-400 tracking-widest">Documentos Recentes</h3>
-                        {(recentDocuments || []).length > 0 && (
+                        {(mergedDocuments || []).length > 0 && (
                           <button 
                             onClick={clearAllDocuments}
                             className="flex items-center gap-1 text-[9px] font-bold text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 px-2 py-1 rounded-md transition-all uppercase tracking-widest"
@@ -2236,7 +2432,7 @@ export default function App() {
                         )}
                       </div>
                       <div className="space-y-2 max-h-[300px] overflow-y-auto pr-2 custom-scrollbar">
-                        {(recentDocuments || []).map((doc) => (
+                        {(mergedDocuments || []).map((doc) => (
                         <div
                           key={doc.id}
                           className="w-full flex items-center justify-between p-3 rounded-xl border border-neutral-100 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800/50 hover:bg-white dark:hover:bg-neutral-800 transition-all group"
@@ -2245,13 +2441,18 @@ export default function App() {
                             onClick={() => handleOpenRecent(doc)}
                             className="flex-1 flex items-center gap-3 overflow-hidden text-left"
                           >
-                            <div className="p-2 bg-blue-50 dark:bg-blue-900/30 text-blue-600 rounded-lg group-hover:bg-blue-600 group-hover:text-white transition-colors">
+                            <div className={cn(
+                              "p-2 rounded-lg transition-colors",
+                              doc.source === 'local' 
+                                ? "bg-green-50 dark:bg-green-900/30 text-green-600 group-hover:bg-green-600 group-hover:text-white" 
+                                : "bg-blue-50 dark:bg-blue-900/30 text-blue-600 group-hover:bg-blue-600 group-hover:text-white"
+                            )}>
                               <FileText size={16} />
                             </div>
                             <div className="flex flex-col overflow-hidden">
                               <span className="text-xs font-bold truncate">{doc.name}</span>
                               <span className="text-[10px] text-neutral-400">
-                                {new Date(doc.created_at).toLocaleDateString()}
+                                {doc.source === 'local' ? 'Indexado Localmente' : 'Servidor'} • {new Date(doc.last_accessed || doc.created_at).toLocaleDateString()}
                               </span>
                             </div>
                           </button>
@@ -2397,31 +2598,70 @@ export default function App() {
                 style={{ width: 'fit-content' }}
                 onClick={handlePdfClick}
               >
-                <PDFViewer 
-                  url={pdfUrl} 
-                  token={token}
-                  currentPage={currentPage}
-                  zoom={zoom}
-                  onPageChange={setCurrentPage}
-                  onTextExtract={setFullText}
-                  onThumbnailsGenerated={setThumbnails}
-                  highlightQueries={highlightQueries}
-                  currentMatch={activeMatch}
-                  showAll={searchFilters.showAll}
-                  showHighlights={showHighlights}
-                  highlightColor="#facc15"
-                  textHighlights={textHighlights}
-                  selectedHighlightId={selectedHighlightId}
-                  showAllAnnotations={showAllAnnotations}
-                  editMode={editMode}
-                  onTextSelection={handleTextSelection}
-                  onHighlightClick={(h) => setSelectedHighlightId(h.id)}
-                  onHighlightResize={handleHighlightResize}
-                  scrollContainerRef={scrollContainerRef}
-                  onMouseDown={handlePdfMouseDown}
-                  onMouseMove={handlePdfMouseMove}
-                  onMouseUp={handlePdfMouseUp}
-                />
+                {docName?.toLowerCase().match(/\.(jpg|jpeg|png|gif|webp)$/) ? (
+                  <div className="bg-white dark:bg-neutral-800 shadow-2xl rounded-sm p-4">
+                    <img 
+                      src={pdfUrl || ''} 
+                      alt={docName} 
+                      className="max-w-full h-auto block"
+                      style={{ transform: `scale(${zoom})`, transformOrigin: 'top left' }}
+                      referrerPolicy="no-referrer"
+                    />
+                  </div>
+                ) : docName?.toLowerCase().endsWith('.pdf') ? (
+                  <PDFViewer 
+                    url={pdfUrl} 
+                    token={token}
+                    currentPage={currentPage}
+                    zoom={zoom}
+                    onPageChange={setCurrentPage}
+                    onTextExtract={(text) => {
+                      setFullText(text);
+                      if (docId) {
+                        updateLocalDocument(docId, { text }).catch(err => 
+                          console.error("Error saving text to IndexedDB:", err)
+                        );
+                      }
+                    }}
+                    onThumbnailsGenerated={setThumbnails}
+                    highlightQueries={highlightQueries}
+                    currentMatch={activeMatch}
+                    showAll={searchFilters.showAll}
+                    showHighlights={showHighlights}
+                    highlightColor="#facc15"
+                    textHighlights={textHighlights}
+                    selectedHighlightId={selectedHighlightId}
+                    showAllAnnotations={showAllAnnotations}
+                    editMode={editMode}
+                    onTextSelection={handleTextSelection}
+                    onHighlightClick={(h) => setSelectedHighlightId(h.id)}
+                    onHighlightResize={handleHighlightResize}
+                    scrollContainerRef={scrollContainerRef}
+                    onMouseDown={handlePdfMouseDown}
+                    onMouseMove={handlePdfMouseMove}
+                    onMouseUp={handlePdfMouseUp}
+                  />
+                ) : (
+                  <div className="flex flex-col items-center justify-center p-12 bg-white dark:bg-neutral-900 rounded-2xl shadow-xl border border-neutral-200 dark:border-neutral-800 text-center max-w-md mx-auto">
+                    <div className="w-20 h-20 bg-blue-50 dark:bg-blue-900/20 rounded-full flex items-center justify-center mb-6">
+                      <FileText className="text-blue-600" size={40} />
+                    </div>
+                    <h3 className="text-xl font-bold text-neutral-900 dark:text-white mb-2">Visualização não disponível</h3>
+                    <p className="text-neutral-500 dark:text-neutral-400 text-sm mb-8">
+                      Este tipo de arquivo ({docName?.split('.').pop()?.toUpperCase()}) não pode ser visualizado diretamente, mas você ainda pode analisá-lo com IA ou baixá-lo.
+                    </p>
+                    <div className="flex gap-4">
+                      <a 
+                        href={pdfUrl} 
+                        download={docName}
+                        className="px-6 py-2 bg-blue-600 text-white rounded-full text-sm font-bold hover:bg-blue-700 transition-all flex items-center gap-2"
+                      >
+                        <Download size={16} />
+                        Baixar Arquivo
+                      </a>
+                    </div>
+                  </div>
+                )}
                 
                 {/* Visual Overlays for Edits */}
                 {showAllAnnotations && (edits || []).filter(e => e.page === currentPage).map((edit, i) => (
@@ -2614,7 +2854,7 @@ export default function App() {
                   <motion.div initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -10 }} className="space-y-4">
                     <div className="flex items-center justify-between mb-2">
                       <h3 className="text-[10px] font-black uppercase text-neutral-400 tracking-widest">Documentos Recentes</h3>
-                        {(recentDocuments || []).length > 0 && (
+                        {(mergedDocuments || []).length > 0 && (
                           <button 
                             onClick={clearAllDocuments}
                             className="flex items-center gap-1 text-[9px] font-bold text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 px-2 py-1 rounded-md transition-all uppercase tracking-widest"
@@ -2626,13 +2866,13 @@ export default function App() {
                     </div>
                     
                     <div className="space-y-2">
-                      {(recentDocuments || []).length === 0 && (
+                      {(mergedDocuments || []).length === 0 && (
                         <div className="text-center py-12">
                           <FileText size={32} className="mx-auto text-neutral-200 mb-3" />
                           <p className="text-xs text-neutral-400 italic">Nenhum documento recente.</p>
                         </div>
                       )}
-                      {(recentDocuments || []).map((doc) => (
+                      {(mergedDocuments || []).map((doc) => (
                         <div 
                           key={doc.id}
                           className={cn(
@@ -2648,13 +2888,15 @@ export default function App() {
                           >
                             <div className={cn(
                               "w-8 h-8 rounded-lg flex items-center justify-center transition-colors",
-                              docId === doc.id ? "bg-blue-600 text-white" : "bg-neutral-100 dark:bg-neutral-800 text-neutral-400 group-hover:bg-blue-600 group-hover:text-white"
+                              docId === doc.id ? "bg-blue-600 text-white" : (doc.source === 'local' ? "bg-green-50 dark:bg-green-900/20 text-green-600" : "bg-neutral-100 dark:bg-neutral-800 text-neutral-400 group-hover:bg-blue-600 group-hover:text-white")
                             )}>
                               <FileText size={14} />
                             </div>
                             <div className="overflow-hidden">
                               <p className="text-xs font-bold truncate">{doc.name}</p>
-                              <p className="text-[10px] text-neutral-400">{new Date(doc.created_at).toLocaleDateString()}</p>
+                              <p className="text-[10px] text-neutral-400">
+                                {doc.source === 'local' ? 'Local' : 'Servidor'} • {new Date(doc.last_accessed || doc.created_at).toLocaleDateString()}
+                              </p>
                             </div>
                           </button>
                           <button 

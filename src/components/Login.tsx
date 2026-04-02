@@ -26,15 +26,24 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
         body: JSON.stringify({ email, password }),
       });
 
-      const data = await response.json();
+      const responseText = await response.text();
+      let data;
+      try {
+        data = JSON.parse(responseText);
+      } catch (e) {
+        if (responseText.includes('<!doctype') || responseText.includes('<html')) {
+          throw new Error('Erro no servidor (página HTML retornada).');
+        }
+        throw new Error('Resposta do servidor inválida.');
+      }
 
       if (response.ok) {
         onLogin(data.token, data.user);
       } else {
         setError(data.error || 'Falha ao entrar. Verifique suas credenciais.');
       }
-    } catch (err) {
-      setError('Erro de conexão com o servidor.');
+    } catch (err: any) {
+      setError(err.message || 'Erro de conexão com o servidor.');
     } finally {
       setIsLoading(false);
     }
@@ -130,6 +139,54 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
               className="w-full bg-blue-600 text-white py-4 rounded-2xl text-sm font-black uppercase tracking-widest hover:bg-blue-700 transition-all shadow-xl shadow-blue-600/20 flex items-center justify-center gap-2 disabled:opacity-50"
             >
               {isLoading ? <Loader2 size={18} className="animate-spin" /> : "Entrar"}
+            </button>
+
+            <div className="relative py-2">
+              <div className="absolute inset-0 flex items-center">
+                <div className="w-full border-t border-neutral-100 dark:border-neutral-800"></div>
+              </div>
+              <div className="relative flex justify-center text-[10px] uppercase font-black tracking-widest">
+                <span className="bg-white dark:bg-neutral-900 px-4 text-neutral-400">Ou</span>
+              </div>
+            </div>
+
+            <button 
+              type="button"
+              onClick={async () => {
+                const guestEmail = 'convidado@pdfmaster.ai';
+                const guestPass = 'Convidado@2026';
+                setEmail(guestEmail);
+                setPassword(guestPass);
+                
+                setIsLoading(true);
+                setError('');
+                try {
+                  const response = await fetch('/api/auth/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email: guestEmail, password: guestPass }),
+                  });
+                  const responseText = await response.text();
+                  let data;
+                  try {
+                    data = JSON.parse(responseText);
+                  } catch (e) {
+                    throw new Error('Erro de conexão.');
+                  }
+                  if (response.ok) {
+                    onLogin(data.token, data.user);
+                  } else {
+                    setError(data.error || 'Falha no acesso rápido.');
+                  }
+                } catch (err: any) {
+                  setError(err.message || 'Erro de conexão.');
+                } finally {
+                  setIsLoading(false);
+                }
+              }}
+              className="w-full bg-neutral-50 dark:bg-neutral-900/50 text-neutral-600 dark:text-neutral-400 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-all flex items-center justify-center gap-2 border border-neutral-200 dark:border-neutral-800"
+            >
+              Acesso Rápido (Convidado)
             </button>
           </form>
 

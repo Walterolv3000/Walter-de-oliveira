@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { 
   Users, UserPlus, Pencil, Trash2, Search, X, 
   Shield, User, Mail, Calendar, Loader2, ChevronLeft,
-  Key, RefreshCw, Eraser, Brain
+  Key, RefreshCw, Eraser, Brain, Download, Monitor, Laptop, Smartphone
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../lib/utils';
@@ -26,7 +26,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, onBack, s
   const [users, setUsers] = useState<UserData[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
-  const [activeTab, setActiveTab] = useState<'users' | 'prompts'>('users');
+  const [activeTab, setActiveTab] = useState<'users' | 'prompts' | 'downloads'>('users');
   const [prompts, setPrompts] = useState<any[]>([]);
   const [isPromptModalOpen, setIsPromptModalOpen] = useState(false);
   const [editingPrompt, setEditingPrompt] = useState<any>(null);
@@ -67,8 +67,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, onBack, s
         headers: { 'Authorization': `Bearer ${token}` }
       });
       if (response.ok) {
-        const data = await response.json();
-        setUsers(data);
+        const contentType = response.headers.get("content-type");
+        if (contentType && contentType.includes("application/json")) {
+          const data = await response.json();
+          setUsers(data);
+        }
       }
     } catch (err) {
       console.error("Failed to fetch users", err);
@@ -83,8 +86,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, onBack, s
         headers: { 'Authorization': `Bearer ${token}` }
       });
       if (response.ok) {
-        const data = await response.json();
-        setPrompts(data);
+        const contentType = response.headers.get("content-type");
+        if (contentType && contentType.includes("application/json")) {
+          const data = await response.json();
+          setPrompts(data);
+        }
       }
     } catch (err) {
       console.error("Failed to fetch prompts", err);
@@ -137,8 +143,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, onBack, s
         fetchUsers();
         showToast(editingUser ? "Usuário atualizado com sucesso" : "Usuário criado com sucesso");
       } else {
-        const data = await response.json();
-        showToast(data.error || "Erro ao salvar usuário", "error");
+        const responseText = await response.text();
+        let errorMessage = "Erro ao salvar usuário";
+        try {
+          const data = JSON.parse(responseText);
+          errorMessage = data.error || errorMessage;
+        } catch (e) {
+          if (responseText.includes('<!doctype') || responseText.includes('<html')) {
+            errorMessage = "Erro no servidor (HTML).";
+          }
+        }
+        showToast(errorMessage, "error");
       }
     } catch (err) {
       showToast("Erro de conexão", "error");
@@ -168,8 +183,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, onBack, s
         setIsPasswordResetModalOpen(false);
         showToast("Senha resetada com sucesso!");
       } else {
-        const data = await response.json();
-        showToast(data.error || "Erro ao resetar senha", "error");
+        const responseText = await response.text();
+        let errorMessage = "Erro ao resetar senha";
+        try {
+          const data = JSON.parse(responseText);
+          errorMessage = data.error || errorMessage;
+        } catch (e) {
+          if (responseText.includes('<!doctype') || responseText.includes('<html')) {
+            errorMessage = "Erro no servidor (HTML).";
+          }
+        }
+        showToast(errorMessage, "error");
       }
     } catch (err) {
       showToast("Erro de conexão", "error");
@@ -222,8 +246,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, onBack, s
         setIsDeleteModalOpen(false);
         showToast("Usuário excluído com sucesso");
       } else {
-        const data = await response.json();
-        showToast(data.error || "Erro ao excluir usuário", "error");
+        const responseText = await response.text();
+        let errorMessage = "Erro ao excluir usuário";
+        try {
+          const data = JSON.parse(responseText);
+          errorMessage = data.error || errorMessage;
+        } catch (e) {
+          if (responseText.includes('<!doctype') || responseText.includes('<html')) {
+            errorMessage = "Erro no servidor (HTML).";
+          }
+        }
+        showToast(errorMessage, "error");
       }
     } catch (err) {
       showToast("Erro de conexão ao tentar excluir", "error");
@@ -273,8 +306,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, onBack, s
         fetchPrompts();
         showToast(editingPrompt ? "Prompt atualizado com sucesso" : "Prompt criado com sucesso");
       } else {
-        const data = await response.json();
-        showToast(data.error || "Erro ao salvar prompt", "error");
+        const responseText = await response.text();
+        let errorMessage = "Erro ao salvar prompt";
+        try {
+          const data = JSON.parse(responseText);
+          errorMessage = data.error || errorMessage;
+        } catch (e) {
+          if (responseText.includes('<!doctype') || responseText.includes('<html')) {
+            errorMessage = "Erro no servidor (HTML).";
+          }
+        }
+        showToast(errorMessage, "error");
       }
     } catch (err) {
       showToast("Erro de conexão", "error");
@@ -298,8 +340,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, onBack, s
         setIsPromptDeleteModalOpen(false);
         showToast("Prompt excluído com sucesso");
       } else {
-        const data = await response.json();
-        showToast(data.error || "Erro ao excluir prompt", "error");
+        const responseText = await response.text();
+        let errorMessage = "Erro ao excluir prompt";
+        try {
+          const data = JSON.parse(responseText);
+          errorMessage = data.error || errorMessage;
+        } catch (e) {
+          if (responseText.includes('<!doctype') || responseText.includes('<html')) {
+            errorMessage = "Erro no servidor (HTML).";
+          }
+        }
+        showToast(errorMessage, "error");
       }
     } catch (err) {
       showToast("Erro de conexão ao tentar excluir", "error");
@@ -357,14 +408,29 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, onBack, s
                 >
                   Prompts
                 </button>
+                <button 
+                  onClick={() => setActiveTab('downloads')}
+                  className={cn(
+                    "text-[10px] font-black uppercase tracking-widest transition-all px-2 py-1 rounded-lg",
+                    activeTab === 'downloads' ? "bg-blue-600 text-white" : "text-neutral-400 hover:text-neutral-600"
+                  )}
+                >
+                  Downloads
+                </button>
               </div>
             </div>
           </div>
         </div>
 
         <button 
-          onClick={() => activeTab === 'users' ? handleOpenModal() : handleOpenPromptModal()}
-          className="bg-blue-600 text-white px-6 py-2.5 rounded-2xl text-xs font-black uppercase tracking-widest hover:bg-blue-700 transition-all shadow-lg shadow-blue-600/20 flex items-center gap-2"
+          onClick={() => {
+            if (activeTab === 'users') handleOpenModal();
+            else if (activeTab === 'prompts') handleOpenPromptModal();
+          }}
+          className={cn(
+            "bg-blue-600 text-white px-6 py-2.5 rounded-2xl text-xs font-black uppercase tracking-widest hover:bg-blue-700 transition-all shadow-lg shadow-blue-600/20 flex items-center gap-2",
+            activeTab === 'downloads' && "hidden"
+          )}
         >
           {activeTab === 'users' ? <UserPlus size={16} /> : <Brain size={16} />}
           {activeTab === 'users' ? 'Novo Usuário' : 'Novo Prompt'}
@@ -373,7 +439,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, onBack, s
 
       <main className="flex-1 p-8 max-w-7xl mx-auto w-full space-y-8">
         {/* Stats & Search */}
-        <div className="flex flex-col md:flex-row gap-6 items-center justify-between">
+        <div className={cn(
+          "flex flex-col md:flex-row gap-6 items-center justify-between",
+          activeTab === 'downloads' && "hidden"
+        )}>
           <div className="flex gap-4 w-full md:w-auto">
             <div className="bg-white dark:bg-neutral-900 p-6 rounded-[24px] border border-neutral-200 dark:border-neutral-800 shadow-sm flex-1 md:w-48">
               <p className="text-[10px] font-black uppercase text-neutral-400 tracking-widest mb-1">
@@ -504,7 +573,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, onBack, s
               </table>
             </div>
           </div>
-        ) : (
+        ) : activeTab === 'prompts' ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {prompts.filter(p => 
               p.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
@@ -543,6 +612,85 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, onBack, s
                 </p>
               </div>
             ))}
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+            <div className="bg-white dark:bg-neutral-900 rounded-[32px] p-8 border border-neutral-200 dark:border-neutral-800 shadow-xl flex flex-col items-center text-center space-y-6">
+              <div className="w-16 h-16 rounded-3xl bg-blue-600/10 flex items-center justify-center text-blue-600">
+                <Download size={32} />
+              </div>
+              <div>
+                <h3 className="text-lg font-black uppercase tracking-tight mb-2">Instalação via Navegador (PWA)</h3>
+                <p className="text-xs text-neutral-500 leading-relaxed">
+                  Instale como um aplicativo nativo diretamente pelo seu navegador (Chrome, Edge).
+                </p>
+              </div>
+              <div className="w-full p-4 bg-blue-50 dark:bg-blue-900/20 rounded-2xl text-left">
+                <p className="text-[10px] font-bold text-blue-600 uppercase tracking-widest mb-2">Como instalar:</p>
+                <ol className="text-[10px] text-neutral-600 dark:text-neutral-400 space-y-1 list-decimal ml-4">
+                  <li>Clique no botão "Instalar App" que aparece na barra superior.</li>
+                  <li>Ou clique no ícone de instalação na barra de endereços do navegador.</li>
+                  <li>Confirme a instalação para criar um atalho na sua área de trabalho.</li>
+                </ol>
+              </div>
+            </div>
+
+            <div className="bg-white dark:bg-neutral-900 rounded-[32px] p-8 border border-neutral-200 dark:border-neutral-800 shadow-xl flex flex-col items-center text-center space-y-6">
+              <div className="w-16 h-16 rounded-3xl bg-blue-600/10 flex items-center justify-center text-blue-600">
+                <Monitor size={32} />
+              </div>
+              <div>
+                <h3 className="text-lg font-black uppercase tracking-tight mb-2">Windows</h3>
+                <p className="text-xs text-neutral-500 leading-relaxed">
+                  Versão portátil para Windows 10/11 (x64). Não requer instalação.
+                </p>
+              </div>
+              <a 
+                href="/api/download/portable/windows" 
+                className="w-full bg-blue-600 text-white py-4 rounded-2xl text-xs font-black uppercase tracking-widest hover:bg-blue-700 transition-all shadow-lg shadow-blue-600/20 flex items-center justify-center gap-2"
+              >
+                <Download size={18} />
+                Download EXE
+              </a>
+            </div>
+
+            <div className="bg-white dark:bg-neutral-900 rounded-[32px] p-8 border border-neutral-200 dark:border-neutral-800 shadow-xl flex flex-col items-center text-center space-y-6">
+              <div className="w-16 h-16 rounded-3xl bg-neutral-100 dark:bg-neutral-800 flex items-center justify-center text-neutral-600">
+                <Laptop size={32} />
+              </div>
+              <div>
+                <h3 className="text-lg font-black uppercase tracking-tight mb-2">Linux</h3>
+                <p className="text-xs text-neutral-500 leading-relaxed">
+                  Binário executável para distribuições Linux (x64).
+                </p>
+              </div>
+              <a 
+                href="/api/download/portable/linux" 
+                className="w-full bg-neutral-800 text-white py-4 rounded-2xl text-xs font-black uppercase tracking-widest hover:bg-neutral-900 transition-all shadow-lg shadow-neutral-800/20 flex items-center justify-center gap-2"
+              >
+                <Download size={18} />
+                Download Bin
+              </a>
+            </div>
+
+            <div className="bg-white dark:bg-neutral-900 rounded-[32px] p-8 border border-neutral-200 dark:border-neutral-800 shadow-xl flex flex-col items-center text-center space-y-6">
+              <div className="w-16 h-16 rounded-3xl bg-neutral-100 dark:bg-neutral-800 flex items-center justify-center text-neutral-600">
+                <Smartphone size={32} />
+              </div>
+              <div>
+                <h3 className="text-lg font-black uppercase tracking-tight mb-2">macOS</h3>
+                <p className="text-xs text-neutral-500 leading-relaxed">
+                  Versão para macOS (Intel/Apple Silicon via Rosetta).
+                </p>
+              </div>
+              <a 
+                href="/api/download/portable/macos" 
+                className="w-full bg-neutral-800 text-white py-4 rounded-2xl text-xs font-black uppercase tracking-widest hover:bg-neutral-900 transition-all shadow-lg shadow-neutral-800/20 flex items-center justify-center gap-2"
+              >
+                <Download size={18} />
+                Download App
+              </a>
+            </div>
           </div>
         )}
       </main>

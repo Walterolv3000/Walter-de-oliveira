@@ -1,6 +1,7 @@
 import express from "express";
 import multer from "multer";
 import path from "path";
+import { fileURLToPath } from "url";
 import fs from "fs";
 import cors from "cors";
 import helmet from "helmet";
@@ -9,6 +10,14 @@ import { v4 as uuidv4 } from "uuid";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { createClient } from '@supabase/supabase-js';
+
+const resolvedFilename = typeof import.meta !== 'undefined' && import.meta.url 
+  ? fileURLToPath(import.meta.url) 
+  : (typeof __filename !== 'undefined' ? __filename : '');
+
+const resolvedDirname = typeof import.meta !== 'undefined' && import.meta.url 
+  ? path.dirname(fileURLToPath(import.meta.url)) 
+  : (typeof __dirname !== 'undefined' ? __dirname : process.cwd());
 
 const app = express();
 app.set('trust proxy', 1); // Trust first proxy (Cloud Run load balancer)
@@ -28,7 +37,11 @@ const supabase = createClient(
 const isSupabaseConfigured = Boolean(supabaseUrl && (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY));
 
 // Database Setup (Local JSON - Fallback if Supabase is not configured)
-const DB_FILE = path.join(process.cwd(), "db.json");
+const isPkg = (process as any).pkg !== undefined;
+const baseDir = isPkg ? path.dirname(process.execPath) : process.cwd();
+const DB_FILE = path.join(baseDir, "db.json");
+const UPLOAD_DIR = path.join(baseDir, "uploads");
+const CHUNK_DIR = path.join(baseDir, "uploads/chunks");
 
 let db: any = { users: [], prompts: [], documents: [], annotations: [], favorites: [] };
 
@@ -36,7 +49,14 @@ function loadDB() {
   try {
     if (fs.existsSync(DB_FILE)) {
       const data = fs.readFileSync(DB_FILE, "utf-8");
-      db = JSON.parse(data);
+      const parsed = JSON.parse(data);
+      db = {
+        users: parsed.users || [],
+        prompts: parsed.prompts || [],
+        documents: parsed.documents || [],
+        annotations: parsed.annotations || [],
+        favorites: parsed.favorites || []
+      };
       console.log("Database loaded successfully");
     } else {
       console.log("Database file not found, creating initial data");
@@ -68,9 +88,9 @@ function loadDB() {
           },
           {
             id: uuidv4(),
-            name: "Claudio Eustaquio Da Silva",
-            email: "claudioeustaquio@montreal.com.br",
-            password: bcrypt.hashSync("Montreal@2026", 10),
+            name: "Usuário Convidado",
+            email: "convidado@pdfmaster.ai",
+            password: bcrypt.hashSync("Convidado@2026", 10),
             role: "user",
             created_at: new Date().toISOString()
           }
@@ -221,7 +241,7 @@ async function syncUsers() {
   }
 }
 
-syncUsers();
+syncUsers().catch(err => console.error("Failed to sync users on startup:", err));
 
 app.use(helmet({
   contentSecurityPolicy: false, // Disable CSP for development iframe compatibility
@@ -231,20 +251,17 @@ app.use(cors());
 // Rate limiting for auth routes
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // Limit each IP to 100 requests per windowMs
+  limit: 100, // Limit each IP to 100 requests per windowMs
   message: { error: "Muitas tentativas de login, tente novamente mais tarde." },
   standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
   legacyHeaders: false, // Disable the `X-RateLimit-*` headers
-  keyGenerator: (req) => {
-    // Use the IP address provided by Express (which respects 'trust proxy')
-    return req.ip || req.headers['x-forwarded-for']?.toString() || req.socket.remoteAddress || 'unknown';
-  }
+  validate: { xForwardedForHeader: false }, // Trust proxy is already set on app
 });
 
 app.use("/api/auth/", authLimiter);
 
-app.use(express.json({ limit: '32mb' }));
-app.use(express.urlencoded({ limit: '32mb', extended: true }));
+app.use(express.json({ limit: '100mb' }));
+app.use(express.urlencoded({ limit: '100mb', extended: true }));
 
 interface AuthRequest extends express.Request {
   user?: any;
@@ -288,13 +305,27 @@ app.use((req, res, next) => {
 });
 
 // Ensure uploads and chunks directory exists
-const uploadsDir = process.env.VERCEL ? "/tmp/uploads" : path.join(process.cwd(), "uploads");
-const chunksDir = process.env.VERCEL ? "/tmp/chunks" : path.join(process.cwd(), "chunks");
+const isCloudRun = process.env.K_SERVICE !== undefined;
+const uploadsDir = (process.env.VERCEL || isCloudRun) ? "/tmp/uploads" : UPLOAD_DIR;
+const chunksDir = (process.env.VERCEL || isCloudRun) ? "/tmp/chunks" : CHUNK_DIR;
 
 if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
   console.log(`Created uploads directory at ${uploadsDir}`);
+} else {
+  console.log(`Uploads directory exists at ${uploadsDir}`);
 }
+
+// Check writability
+try {
+  const testFile = path.join(uploadsDir, '.write-test');
+  fs.writeFileSync(testFile, 'test');
+  fs.unlinkSync(testFile);
+  console.log(`Uploads directory is writable: ${uploadsDir}`);
+} catch (e) {
+  console.error(`[CRITICAL] Uploads directory is NOT writable: ${uploadsDir}`, e);
+}
+
 if (!fs.existsSync(chunksDir)) {
   fs.mkdirSync(chunksDir, { recursive: true });
   console.log(`Created chunks directory at ${chunksDir}`);
@@ -317,12 +348,36 @@ const storage = multer.diskStorage({
 
 const upload = multer({
   storage,
-  limits: { fileSize: 32 * 1024 * 1024 }, // 32MB (Cloud Run limit)
+  limits: { fileSize: 100 * 1024 * 1024 }, // 100MB (Increased for portable use)
 });
 
 // API Routes
 app.get("/api/health", (req, res) => {
   res.json({ status: "ok", time: new Date().toISOString() });
+});
+
+// Route to download portable executables
+app.get("/api/download/portable/:platform", (req, res) => {
+  const { platform } = req.params;
+  let fileName = "";
+  
+  if (platform === "windows") {
+    fileName = "react-example-win.exe";
+  } else if (platform === "linux") {
+    fileName = "react-example-linux";
+  } else if (platform === "macos") {
+    fileName = "react-example-macos";
+  } else {
+    return res.status(400).json({ error: "Plataforma inválida" });
+  }
+
+  const filePath = path.join(process.cwd(), "bin", fileName);
+  
+  if (fs.existsSync(filePath)) {
+    res.download(filePath, fileName);
+  } else {
+    res.status(404).json({ error: `Executável para ${platform} não encontrado no servidor` });
+  }
 });
 
 // Chunked Upload Endpoints
@@ -345,7 +400,7 @@ const chunkUpload = multer({
       cb(null, `chunk-${chunkIndex}`);
     },
   }),
-  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB per chunk
+  limits: { fileSize: 50 * 1024 * 1024 }, // 50MB per chunk (Increased)
 });
 
 app.post("/api/upload/chunk", authenticateToken, (req: any, res: any, next: any) => {
@@ -375,28 +430,21 @@ app.post("/api/upload/complete", authenticateToken, async (req: any, res) => {
     const finalName = safeName.endsWith(extension) ? safeName : `${safeName}${extension}`;
     const destPath = path.join(uploadsDir, `${id}-${finalName}`);
     
-    const writeStream = fs.createWriteStream(destPath);
-    
+    // Use appendFileSync for synchronous, reliable chunk assembly
     for (let i = 0; i < totalChunks; i++) {
       const chunkFilePath = path.join(chunkPath, `chunk-${i}`);
       if (!fs.existsSync(chunkFilePath)) {
         throw new Error(`Chunk ${i} missing`);
       }
       const chunkData = fs.readFileSync(chunkFilePath);
-      writeStream.write(chunkData);
+      fs.appendFileSync(destPath, chunkData);
       fs.unlinkSync(chunkFilePath); // Delete chunk after writing
     }
     
-    writeStream.end();
-    
-    // Wait for write stream to finish
-    await new Promise<void>((resolve, reject) => {
-      writeStream.on('finish', () => resolve());
-      writeStream.on('error', (err) => reject(err));
-    });
-    
     // Clean up chunk directory
-    fs.rmdirSync(chunkPath);
+    if (fs.existsSync(chunkPath)) {
+      fs.rmSync(chunkPath, { recursive: true, force: true });
+    }
     
     const newDoc = {
       id,
@@ -436,7 +484,7 @@ app.post(["/api/upload", "/api/upload/"], authenticateToken, (req, res, next) =>
     if (err instanceof multer.MulterError) {
       console.error("Multer error:", err);
       if (err.code === 'LIMIT_FILE_SIZE') {
-        return res.status(400).json({ error: "Arquivo muito grande. O limite é 1GB." });
+        return res.status(400).json({ error: "Arquivo muito grande. O limite é 32MB por upload direto. Use o upload em partes para arquivos maiores." });
       }
       return res.status(400).json({ error: `Erro no upload: ${err.message}` });
     } else if (err) {
@@ -910,40 +958,127 @@ app.get(["/api/documents", "/api/documents/"], authenticateToken, async (req, re
   }
 });
 
-app.get(["/api/documents/:id/pdf", "/api/documents/:id/pdf/"], authenticateToken, async (req, res) => {
+app.get(["/api/documents/:id/pdf", "/api/documents/:id/pdf/"], authenticateToken, async (req: AuthRequest, res) => {
   const { id } = req.params;
+  console.log(`[Info] PDF Download Request - ID: ${id}, User: ${req.user?.email || 'unknown'}`);
+  
   try {
     let doc: any;
     if (isSupabaseConfigured) {
+      console.log(`[Info] Fetching document ${id} from Supabase`);
       const { data, error } = await supabase
         .from('documents')
         .select('*')
         .eq('id', id)
         .single();
       
-      if (error) return res.status(404).json({ error: "Não encontrado" });
+      if (error) {
+        console.error(`[404] Supabase error for ID ${id}:`, error);
+        return res.status(404).json({ error: "Documento não encontrado no banco de dados" });
+      }
       doc = data;
     } else {
+      if (!db.documents) db.documents = [];
       doc = db.documents.find((d: any) => d.id === id);
     }
 
-    if (!doc) {
-      console.log(`[404] Document metadata not found for ID: ${id}`);
-      return res.status(404).json({ error: "Documento não encontrado no banco de dados" });
+    if (!doc || !doc.path) {
+      console.log(`[404] Document metadata or path missing for ID: ${id}`);
+      return res.status(404).json({ error: "Metadados do documento ou caminho do arquivo não encontrados" });
     }
 
-    const filePath = path.join(uploadsDir, doc.path);
+    // Ensure uploadsDir is absolute and exists
+    const absoluteUploadsDir = path.isAbsolute(uploadsDir) ? uploadsDir : path.resolve(uploadsDir);
+    
+    console.log(`[Debug] absoluteUploadsDir: ${absoluteUploadsDir}`);
+    
+    if (!fs.existsSync(absoluteUploadsDir)) {
+      console.error(`[Error] Uploads directory missing: ${absoluteUploadsDir}`);
+      return res.status(500).json({ 
+        error: "Diretório de uploads não encontrado no servidor.",
+        path: absoluteUploadsDir
+      });
+    }
+
+    const fileName = path.basename(doc.path);
+    const filePath = path.join(absoluteUploadsDir, fileName);
+    
+    console.log(`[Info] Serving file: ${fileName} from ${absoluteUploadsDir}`);
+    console.log(`[Info] Full path: ${filePath}`);
+
     if (!fs.existsSync(filePath)) {
-      console.error(`[404] PDF file missing on disk: ${filePath} (Doc ID: ${id})`);
-      return res.status(404).json({ error: "Arquivo físico não encontrado no servidor. O servidor pode ter sido reiniciado." });
+      console.error(`[404] File missing on disk: ${filePath} (Doc ID: ${id})`);
+      // List files in directory for debugging
+      try {
+        const files = fs.readdirSync(absoluteUploadsDir);
+        console.log(`[Debug] Files in uploads dir (${files.length}): ${files.slice(0, 10).join(', ')}${files.length > 10 ? '...' : ''}`);
+      } catch (e) {
+        console.error("[Debug] Could not list files in uploads dir", e);
+      }
+      return res.status(404).json({ 
+        error: "O arquivo físico não foi encontrado no servidor. Isso pode ocorrer se o servidor foi reiniciado e o armazenamento é temporário.",
+        fileName: fileName,
+        dir: absoluteUploadsDir
+      });
     }
 
-    res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `inline; filename="${doc.name}"`);
-    res.sendFile(filePath);
+    // Determine content type based on extension
+    const ext = path.extname(fileName).toLowerCase();
+    let contentType = 'application/octet-stream';
+    if (ext === '.pdf') contentType = 'application/pdf';
+    else if (['.jpg', '.jpeg'].includes(ext)) contentType = 'image/jpeg';
+    else if (ext === '.png') contentType = 'image/png';
+    else if (ext === '.txt') contentType = 'text/plain';
+
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(doc.name || 'document' + ext)}"`);
+    res.setHeader('Accept-Ranges', 'bytes');
+    
+    // Use root option for res.sendFile for better security and path handling
+    res.sendFile(fileName, { 
+      root: absoluteUploadsDir,
+      headers: {
+        'x-timestamp': String(Date.now()),
+        'x-sent': 'true'
+      }
+    }, (err: any) => {
+      if (err) {
+        // Check if the error is due to client disconnection or aborted request
+        const isClientError = 
+          (err.code && ['ECONNRESET', 'EPIPE', 'ECANCELED', 'ECONNABORTED'].includes(err.code)) || 
+          (err.message && (
+            err.message.toLowerCase().includes('epipe') || 
+            err.message.toLowerCase().includes('broken pipe') || 
+            err.message.toLowerCase().includes('aborted') ||
+            err.message.toLowerCase().includes('connection reset')
+          )) ||
+          err.name === 'AbortError' ||
+          res.destroyed;
+                             
+        if (isClientError) {
+          console.log(`[Info] Client disconnected or aborted during file download (ID: ${id}, Code: ${err.code || 'N/A'}, Message: ${err.message})`);
+          return;
+        }
+        
+        console.error(`[Error] res.sendFile failed for ${id} (Headers sent: ${res.headersSent}):`, err);
+        if (!res.headersSent && !res.destroyed) {
+          res.status(err.status || 500).json({ 
+            error: `Erro ao transmitir o arquivo: ${err.message}`,
+            details: err.code
+          });
+        }
+      } else {
+        console.log(`[Success] File ${id} sent successfully`);
+      }
+    });
   } catch (err: any) {
-    console.error("Download error:", err);
-    res.status(500).json({ error: "Falha ao baixar PDF" });
+    console.error(`[Critical] Download error for ${id}:`, err);
+    if (!res.headersSent) {
+      res.status(500).json({ 
+        error: `Falha interna ao processar download: ${err.message}`,
+        stack: process.env.NODE_ENV === 'development' ? err.stack : undefined
+      });
+    }
   }
 });
 
@@ -1226,11 +1361,17 @@ app.all("/api/*", (req, res) => {
 // Global error handler
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
   console.error("Unhandled error:", err);
-  res.status(500).json({ 
-    error: "Internal server error", 
-    message: err.message,
-    stack: process.env.NODE_ENV === 'production' ? undefined : err.stack 
-  });
+  
+  // If it's an API route, always return JSON
+  if (req.url.startsWith('/api/')) {
+    return res.status(err.status || 500).json({ 
+      error: "Internal server error", 
+      message: err.message || "Ocorreu um erro interno no servidor"
+    });
+  }
+  
+  // For other routes, let it fall through or send a simple error
+  res.status(err.status || 500).send(err.message || "Internal server error");
 });
 
 async function startServer() {
@@ -1243,11 +1384,20 @@ async function startServer() {
       });
       app.use(vite.middlewares);
     } else {
-      const distPath = path.join(process.cwd(), "dist");
-      if (fs.existsSync(distPath)) {
-        app.use(express.static(distPath));
+      // When using pkg, the dist folder is inside the executable
+      const isPkg = (process as any).pkg !== undefined;
+      const distPath = isPkg 
+        ? path.join(path.dirname(process.execPath), "dist") // Look outside first
+        : path.join(process.cwd(), "dist");
+      
+      // Fallback to internal snapshot if not found outside
+      const internalDistPath = path.join(resolvedDirname, "dist");
+      const finalDistPath = fs.existsSync(distPath) ? distPath : internalDistPath;
+
+      if (fs.existsSync(finalDistPath)) {
+        app.use(express.static(finalDistPath));
         app.get("*", (req, res) => {
-          res.sendFile(path.join(distPath, "index.html"));
+          res.sendFile(path.join(finalDistPath, "index.html"));
         });
       } else {
         app.get("*", (req, res) => {
@@ -1266,6 +1416,9 @@ async function startServer() {
   }
 }
 
-startServer();
+startServer().catch(err => {
+  console.error("CRITICAL: Failed to start server:", err);
+  process.exit(1);
+});
 
 export default app;

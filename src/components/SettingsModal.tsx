@@ -166,6 +166,24 @@ export const SettingsModal: React.FC<SettingsModalProps> = React.memo(({
                   </div>
                 ))}
               </div>
+
+              <div className="bg-blue-50 dark:bg-blue-900/10 p-4 rounded-2xl border border-blue-100 dark:border-blue-900/30 space-y-2">
+                <h3 className="text-[10px] font-black uppercase text-blue-600 dark:text-blue-400 tracking-widest">Versão Portátil (Desktop)</h3>
+                <p className="text-[10px] text-blue-800/70 dark:text-blue-300/70 leading-relaxed">
+                  Você pode gerar um executável (.exe) para usar este app no Windows sem instalar nada.
+                </p>
+                <div className="bg-white/50 dark:bg-black/20 p-2 rounded-lg border border-blue-200/50 dark:border-blue-800/30">
+                  <p className="text-[9px] font-medium text-blue-900 dark:text-blue-100">
+                    Para baixar o executável:
+                  </p>
+                  <ol className="text-[9px] text-blue-800/80 dark:text-blue-300/80 list-decimal list-inside mt-1 space-y-1">
+                    <li>Exporte o projeto como ZIP (Menu Configurações do AI Studio)</li>
+                    <li>Instale o Node.js no seu PC</li>
+                    <li>Abra o terminal na pasta e digite: <code className="bg-blue-100 dark:bg-blue-900 px-1 rounded">npm run build:exe</code></li>
+                    <li>O arquivo estará na pasta <code className="bg-blue-100 dark:bg-blue-900 px-1 rounded">bin/</code></li>
+                  </ol>
+                </div>
+              </div>
             </div>
 
             <div className="p-4 md:p-6 bg-neutral-50 dark:bg-neutral-800/50 flex justify-end">
