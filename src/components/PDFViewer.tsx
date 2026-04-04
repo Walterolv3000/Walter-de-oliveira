@@ -69,6 +69,8 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({
   const [renderTask, setRenderTask] = useState<any>(null);
   const [highlights, setHighlights] = useState<{ x: number, y: number, w: number, h: number, text: string, isCurrent: boolean }[]>([]);
   const [resizingInfo, setResizingInfo] = useState<{ id: string, edge: 'start' | 'end', startX: number, startY: number } | null>(null);
+  const lastScrollTime = useRef<number>(0);
+  const scrollThreshold = 300; // ms between page turns
 
   // Load PDF
   useEffect(() => {
@@ -419,6 +421,36 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({
     };
   }, [currentPage, onTextSelection, zoom, textHighlights, resizingInfo, onHighlightResize, editMode]);
 
+  // Handle Scroll to Page
+  const handleWheel = (e: React.WheelEvent) => {
+    if (!pdf || isLoading) return;
+    
+    const now = Date.now();
+    if (now - lastScrollTime.current < scrollThreshold) return;
+
+    const container = scrollContainerRef?.current;
+    if (!container) return;
+
+    // Check if we are at the boundaries of the scroll container
+    const isAtBottom = Math.abs(container.scrollHeight - container.scrollTop - container.clientHeight) < 30;
+    const isAtTop = container.scrollTop <= 10;
+    
+    // If the page is zoomed out enough that there's no scrollbar, any scroll should change the page
+    const isScrollable = container.scrollHeight > container.clientHeight + 20;
+
+    if (e.deltaY > 50) { // Scrolling down with some intent
+      if ((!isScrollable || isAtBottom) && currentPage < pdf.numPages) {
+        onPageChange?.(currentPage + 1);
+        lastScrollTime.current = now;
+      }
+    } else if (e.deltaY < -50) { // Scrolling up with some intent
+      if ((!isScrollable || isAtTop) && currentPage > 1) {
+        onPageChange?.(currentPage - 1);
+        lastScrollTime.current = now;
+      }
+    }
+  };
+
   if (error) {
     return (
       <div className="flex flex-col items-center justify-center h-full p-12 text-center bg-white dark:bg-neutral-900 rounded-2xl shadow-inner border border-red-100 dark:border-red-900/20 m-8">
@@ -438,7 +470,10 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({
   }
 
   return (
-    <div className="flex flex-col items-center bg-[#E8E9EB] dark:bg-neutral-950 p-8 md:p-12 min-h-full scroll-smooth">
+    <div 
+      className="flex flex-col items-center bg-[#E8E9EB] dark:bg-neutral-950 p-8 md:p-12 min-h-full scroll-smooth"
+      onWheel={handleWheel}
+    >
       <motion.div 
         key={currentPage}
         initial={{ opacity: 0, y: 10 }}

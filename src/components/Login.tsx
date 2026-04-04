@@ -19,6 +19,12 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
     setIsLoading(true);
     setError('');
 
+    if (!navigator.onLine) {
+      setError('Você está offline. O login requer uma conexão com a internet.');
+      setIsLoading(false);
+      return;
+    }
+
     try {
       const response = await fetch('/api/auth/login', {
         method: 'POST',
@@ -67,6 +73,11 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
             <p className="text-sm text-neutral-500 dark:text-neutral-400 font-medium">
               Entre para gerenciar seus documentos
             </p>
+            {!navigator.onLine && (
+              <div className="mt-4 px-3 py-1 bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400 text-[10px] font-black uppercase tracking-widest rounded-full border border-amber-100 dark:border-amber-800">
+                Modo Offline
+              </div>
+            )}
           </div>
 
           <form onSubmit={handleSubmit} className="p-8 space-y-6">

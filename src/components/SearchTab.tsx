@@ -64,83 +64,83 @@ export const SearchTab: React.FC<SearchTabProps> = React.memo(({
   };
 
   return (
-    <motion.div initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -10 }} className="space-y-4">
-      <div className="space-y-4">
+    <motion.div initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -10 }} className="space-y-6">
+      <div className="space-y-5">
         <div className="relative">
           <input 
             type="text" 
             placeholder="Buscar no documento..." 
-            className="w-full bg-neutral-100 dark:bg-neutral-800 rounded-xl pl-10 pr-4 py-3 text-sm outline-none border-none focus:ring-2 ring-blue-500/20 transition-all"
+            className="w-full bg-neutral-100 dark:bg-neutral-800 rounded-2xl pl-11 pr-4 py-3.5 text-sm outline-none border-none focus:ring-2 ring-blue-500/20 transition-all font-medium"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
           />
-          <Search size={18} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-neutral-400" />
+          <Search size={20} className="absolute left-4 top-1/2 -translate-y-1/2 text-neutral-400" />
         </div>
         
-        <div className="flex items-center justify-between px-1">
-          <div className="flex items-center gap-2">
+        <div className="flex flex-col gap-3 px-1">
+          <div className="flex items-center gap-3">
             <input 
               type="checkbox" 
               id="caseSensitive"
               checked={searchFilters.caseSensitive}
               onChange={(e) => setSearchFilters({...searchFilters, caseSensitive: e.target.checked})}
-              className="rounded text-blue-600 w-4 h-4"
+              className="rounded text-blue-600 w-4 h-4 border-neutral-300 focus:ring-blue-500"
             />
-            <label htmlFor="caseSensitive" className="text-[10px] font-bold uppercase text-neutral-500 cursor-pointer tracking-wider">Diferenciar Maiúsculas</label>
+            <label htmlFor="caseSensitive" className="text-[10px] font-black uppercase text-neutral-500 cursor-pointer tracking-widest">Diferenciar Maiúsculas</label>
           </div>
           
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-3">
             <input 
               type="checkbox" 
               id="showAll"
               checked={searchFilters.showAll}
               onChange={(e) => setSearchFilters({...searchFilters, showAll: e.target.checked})}
-              className="rounded text-blue-600 w-4 h-4"
+              className="rounded text-blue-600 w-4 h-4 border-neutral-300 focus:ring-blue-500"
             />
-            <label htmlFor="showAll" className="text-[10px] font-bold uppercase text-neutral-500 cursor-pointer tracking-wider">Marcar Tudo</label>
+            <label htmlFor="showAll" className="text-[10px] font-black uppercase text-neutral-500 cursor-pointer tracking-widest">Marcar Tudo</label>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-3">
             <input 
               type="checkbox" 
               id="showHighlights"
               checked={showHighlights}
               onChange={(e) => setShowHighlights(e.target.checked)}
-              className="rounded text-blue-600 w-4 h-4"
+              className="rounded text-blue-600 w-4 h-4 border-neutral-300 focus:ring-blue-500"
             />
-            <label htmlFor="showHighlights" className="text-[10px] font-bold uppercase text-neutral-500 cursor-pointer tracking-wider">Mostrar Destaques</label>
+            <label htmlFor="showHighlights" className="text-[10px] font-black uppercase text-neutral-500 cursor-pointer tracking-widest">Mostrar Destaques</label>
           </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-2 gap-3">
           <button 
             onClick={() => handleSearch()}
-            className="bg-blue-600 text-white py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider hover:bg-blue-700 transition-all shadow-md shadow-blue-600/20"
+            className="bg-blue-600 text-white py-3 rounded-2xl text-xs font-black uppercase tracking-widest hover:bg-blue-700 transition-all shadow-lg shadow-blue-600/20 active:scale-95"
           >
             Buscar
           </button>
           <button 
             onClick={handleClearAllSearch}
-            className="bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider hover:bg-neutral-200 transition-all"
+            className="bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400 py-3 rounded-2xl text-xs font-black uppercase tracking-widest hover:bg-neutral-200 dark:hover:bg-neutral-700 transition-all active:scale-95"
           >
             Limpar
           </button>
         </div>
 
         {/* Fixed Keywords */}
-        <div className="space-y-2">
+        <div className="space-y-3">
           <div className="flex items-center justify-between px-1">
-            <span className="text-[10px] font-bold text-neutral-400 uppercase tracking-wider">Palavras-Chave Fixas</span>
+            <span className="text-[10px] font-black text-neutral-400 uppercase tracking-widest">Palavras-Chave Fixas</span>
             <button 
               onClick={removeNotFoundKeywords}
-              className="text-[10px] font-bold text-red-500 uppercase tracking-wider hover:text-red-600 transition-colors flex items-center gap-1"
-              title="Remover palavras que não foram encontradas no documento"
+              className="text-[10px] font-black text-red-500 uppercase tracking-widest hover:text-red-600 transition-colors flex items-center gap-1"
             >
               <X size={10} />
               Limpar Não Encontradas
             </button>
           </div>
+          
           <div className="flex flex-wrap gap-2">
             {(fixedKeywords || []).map((kw, i) => {
               const hasMatches = (groupedMatches[kw]?.matches || []).length > 0;
@@ -148,7 +148,7 @@ export const SearchTab: React.FC<SearchTabProps> = React.memo(({
               
               return (
               <div key={i} className={cn(
-                "flex items-center gap-1 px-3 py-1.5 rounded-lg group border transition-all",
+                "flex items-center gap-1 px-3 py-1.5 rounded-xl group border transition-all",
                 searched 
                   ? hasMatches 
                     ? "bg-blue-50 dark:bg-blue-900/20 border-blue-100 dark:border-blue-800" 
@@ -173,19 +173,19 @@ export const SearchTab: React.FC<SearchTabProps> = React.memo(({
             );})}
           </div>
           
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-2 gap-3">
             <button 
               onClick={addFixedKeyword}
-              className="border-2 border-dashed border-neutral-200 dark:border-neutral-800 py-3 rounded-xl text-[10px] font-bold uppercase tracking-widest text-neutral-400 hover:border-blue-500 hover:text-blue-600 transition-all flex items-center justify-center gap-2"
+              className="border-2 border-dashed border-neutral-200 dark:border-neutral-800 py-3.5 rounded-2xl text-[10px] font-black uppercase tracking-widest text-neutral-400 hover:border-blue-500 hover:text-blue-600 transition-all flex items-center justify-center gap-2 active:scale-95"
             >
-              <Plus size={14} />
+              <Plus size={16} />
               Adicionar
             </button>
             <button 
               onClick={() => setIsBulkKeywordsModalOpen(true)}
-              className="border-2 border-dashed border-neutral-200 dark:border-neutral-800 py-3 rounded-xl text-[10px] font-bold uppercase tracking-widest text-neutral-400 hover:border-blue-500 hover:text-blue-600 transition-all flex items-center justify-center gap-2"
+              className="border-2 border-dashed border-neutral-200 dark:border-neutral-800 py-3.5 rounded-2xl text-[10px] font-black uppercase tracking-widest text-neutral-400 hover:border-blue-500 hover:text-blue-600 transition-all flex items-center justify-center gap-2 active:scale-95"
             >
-              <List size={14} />
+              <List size={16} />
               Inserir Lista
             </button>
           </div>

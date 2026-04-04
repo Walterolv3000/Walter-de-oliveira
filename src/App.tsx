@@ -26,7 +26,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Login } from './components/Login';
 import { AdminDashboard } from './components/AdminDashboard';
 import { LogOut, ShieldCheck } from 'lucide-react';
-import { saveLocalDocument, getLocalDocument, deleteLocalDocument, updateLocalDocument, getAllLocalDocuments } from './lib/indexedDB';
+import { saveLocalDocument, getLocalDocument, deleteLocalDocument, updateLocalDocument, getAllLocalDocuments, openDB, STORE_NAME } from './lib/indexedDB';
 
 const DEFAULT_PROMPTS = [
   { id: 'padrão', name: 'Padrão', prompt: 'Você é um especialista em análise de documentos. Extraia informações relevantes, identifique empresas, datas e eventos importantes. Seja preciso e detalhado.', isDefault: true },
@@ -133,6 +133,20 @@ export default function App() {
   const [token, setToken] = useState<string | null>(localStorage.getItem('auth_token'));
   const [isAdminView, setIsAdminView] = useState(false);
   const [isAuthLoading, setIsAuthLoading] = useState(true);
+  const [isOnline, setIsOnline] = useState(navigator.onLine);
+
+  useEffect(() => {
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
 
   const [file, setFile] = useState<File | null>(null);
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
@@ -297,7 +311,6 @@ export default function App() {
       e.preventDefault();
       // Stash the event so it can be triggered later.
       setDeferredPrompt(e);
-      setShowInstallButton(true);
     };
 
     window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
@@ -312,6 +325,15 @@ export default function App() {
       window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
     };
   }, []);
+
+  useEffect(() => {
+    // Only show install button if user is logged in AND we have a deferred prompt
+    if (user && deferredPrompt) {
+      setShowInstallButton(true);
+    } else {
+      setShowInstallButton(false);
+    }
+  }, [user, deferredPrompt]);
 
   const handleInstallClick = async () => {
     if (!deferredPrompt) return;
@@ -1189,22 +1211,33 @@ export default function App() {
       variant: 'danger',
       onConfirm: async () => {
         try {
+          // Always try to delete from IndexedDB
+          try {
+            await deleteLocalDocument(id);
+            setLocalDocuments(prev => prev.filter(doc => doc.id !== id));
+          } catch (localErr) {
+            console.error("Failed to delete local document:", localErr);
+          }
+
           const response = await fetch(`/api/documents/${id}`, { 
             method: 'DELETE',
             headers: { 'Authorization': `Bearer ${token}` }
           });
-          if (response.ok) {
+          
+          if (response.ok || response.status === 404) {
+            // If 404, it's already gone from server, so we consider it a success for the UI
             setRecentDocuments(prev => prev.filter(doc => doc.id !== id));
-            showToast("Documento excluído com sucesso");
+            showToast(response.status === 404 ? "Documento removido (já não existia no servidor)" : "Documento excluído com sucesso");
             if (docId === id) {
               handleCloseDocument();
             }
           } else {
-            throw new Error("Falha ao excluir o documento no servidor.");
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(errorData.error || "Falha ao excluir o documento no servidor.");
           }
-        } catch (error) {
+        } catch (error: any) {
           console.error("Delete error:", error);
-          showToast("Não foi possível excluir o documento", "error");
+          showToast(error.message || "Não foi possível excluir o documento", "error");
         }
       }
     });
@@ -1214,10 +1247,25 @@ export default function App() {
     setConfirmModal({
       isOpen: true,
       title: 'Limpar Todo o Histórico',
-      message: 'Tem certeza que deseja limpar todos os documentos? Esta ação é irreversível e apagará todos os arquivos do servidor.',
+      message: 'Tem certeza que deseja limpar todos os documentos? Esta ação é irreversível e apagará todos os arquivos do servidor e do seu navegador.',
       variant: 'danger',
       onConfirm: async () => {
         try {
+          // Clear local IndexedDB first
+          try {
+            const db = await openDB();
+            const transaction = db.transaction(STORE_NAME, 'readwrite');
+            const store = transaction.objectStore(STORE_NAME);
+            await new Promise<void>((resolve, reject) => {
+              const request = store.clear();
+              request.onsuccess = () => resolve();
+              request.onerror = (e) => reject((e.target as IDBRequest).error);
+            });
+            setLocalDocuments([]);
+          } catch (localErr) {
+            console.error("Failed to clear local documents:", localErr);
+          }
+
           const response = await fetch('/api/documents', { 
             method: 'DELETE',
             headers: { 'Authorization': `Bearer ${token}` }
@@ -1848,7 +1896,7 @@ export default function App() {
   }
 
   return (
-    <div className="flex h-screen w-full overflow-hidden font-sans bg-white text-neutral-900 dark:bg-neutral-950 dark:text-neutral-50 transition-colors duration-300">
+    <div className="flex flex-col h-screen w-full overflow-hidden font-sans bg-white text-neutral-900 dark:bg-neutral-950 dark:text-neutral-50 transition-colors duration-300">
       
       {/* Detailed Analysis Modal */}
       <DetailedAnalysisModal 
@@ -2094,6 +2142,20 @@ export default function App() {
         onConfirmAction={(config) => setConfirmModal({ ...config, isOpen: true })}
       />
 
+      {/* Offline Banner */}
+      <AnimatePresence>
+        {!isOnline && (
+          <motion.div 
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            className="bg-amber-500 text-white text-[10px] font-black uppercase tracking-widest py-1.5 text-center z-[100] relative"
+          >
+            Você está offline. Algumas funcionalidades podem estar limitadas.
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       <PromptEditorModal 
         isOpen={isPromptEditorOpen} 
         onClose={() => {
@@ -2125,12 +2187,10 @@ export default function App() {
       
       {/* Left Resize Handle - REMOVED */}
       
-      {/* Main Content */}
-      <main className="flex-1 flex flex-col relative min-w-0">
-        {/* Toolbar */}
-        <header className="h-14 border-b border-neutral-200 dark:border-neutral-800 flex items-center justify-between px-4 bg-white dark:bg-neutral-900 z-30 relative">
-          {/* Left & Center Section Grouped */}
-          <div className="flex items-center gap-3">
+      {/* Toolbar */}
+      <header className="h-14 border-b border-neutral-200 dark:border-neutral-800 flex items-center justify-between px-4 bg-white dark:bg-neutral-900 z-30 relative">
+          {/* Left Section: Search, Zoom, Page Controls */}
+          <div className="flex items-center gap-2">
             <button 
               onClick={() => {
                 if (!isRightPanelOpen) setIsRightPanelOpen(true);
@@ -2139,12 +2199,12 @@ export default function App() {
               className="p-2 text-neutral-500 hover:bg-neutral-100 rounded-lg"
               title="Buscar"
             >
-              <Search size={20} />
+              <Search size={18} />
             </button>
 
             <div className="flex items-center gap-0.5">
               <button onClick={() => setZoom(z => Math.max(0.5, z - 0.1))} className="p-1.5 hover:bg-neutral-100 rounded-lg text-neutral-500" title="Diminuir Zoom"><ZoomOut size={18} /></button>
-              <span className="text-sm font-bold w-12 text-center">{Math.round(zoom * 100)}%</span>
+              <span className="text-xs font-bold w-10 text-center">{Math.round(zoom * 100)}%</span>
               <button onClick={() => setZoom(z => Math.min(3, z + 0.1))} className="p-1.5 hover:bg-neutral-100 rounded-lg text-neutral-500" title="Aumentar Zoom"><ZoomIn size={18} /></button>
             </div>
 
@@ -2159,7 +2219,7 @@ export default function App() {
                 <ChevronLeft size={18} />
               </button>
               <div className="flex items-center gap-1.5">
-                <span className="text-xs font-medium text-neutral-500">Pág.</span>
+                <span className="text-[10px] font-black uppercase tracking-widest text-neutral-400">Pág.</span>
                 <input 
                   id="page-input"
                   type="text" 
@@ -2169,7 +2229,7 @@ export default function App() {
                   onBlur={handlePageInputBlur}
                   className="w-10 h-7 bg-neutral-100 border border-neutral-200 rounded text-center text-xs font-bold focus:ring-1 ring-blue-500 outline-none"
                 />
-                <span className="text-xs font-medium text-neutral-500">/ {(thumbnails || []).length}</span>
+                <span className="text-[10px] font-black uppercase tracking-widest text-neutral-400">/ {(thumbnails || []).length}</span>
               </div>
               <button 
                 disabled={currentPage === (thumbnails || []).length}
@@ -2182,185 +2242,122 @@ export default function App() {
 
             <div className="h-6 w-px bg-neutral-200 dark:bg-neutral-800 mx-1" />
 
-            <h1 className="text-sm font-bold text-neutral-900 dark:text-neutral-100 truncate max-w-[250px]">
+            <h1 className="text-xs font-black uppercase tracking-tight text-neutral-900 dark:text-neutral-100 truncate max-w-[120px]">
               {file?.name || "Sem título"}
             </h1>
 
-            <div className="h-6 w-px bg-neutral-200 dark:bg-neutral-800 mx-1" />
-
             <button 
               onClick={handleCloseDocument}
-              className="p-1.5 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 rounded-full hover:bg-red-100 dark:hover:bg-red-900/40 transition-all border border-red-100 dark:border-red-800"
+              className="p-1.5 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 rounded-lg hover:bg-red-100 dark:hover:bg-red-900/40 transition-all border border-red-100 dark:border-red-800"
               title="Fechar Arquivo"
             >
-              <X size={18} />
+              <X size={16} />
             </button>
 
             <div className="h-6 w-px bg-neutral-200 dark:bg-neutral-800 mx-1" />
-          </div>
 
-          {/* Right Section */}
-          <div className="flex items-center gap-1">
-            {showInstallButton && (
-              <button 
-                onClick={handleInstallClick}
-                className="p-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-all shadow-lg shadow-blue-500/20 flex items-center gap-2 mr-2"
-                title="Instalar Aplicativo no Computador"
-              >
-                <Download size={18} />
-                <span className="text-[10px] font-black uppercase tracking-widest hidden xl:inline">Instalar App</span>
-              </button>
-            )}
-
-            <div className="h-6 w-px bg-neutral-200 dark:bg-neutral-800 mx-1" />
-
-            <div className="flex items-center gap-1 bg-neutral-100 dark:bg-neutral-800 p-1 rounded-xl">
+            <div className="flex items-center gap-1 bg-neutral-50 dark:bg-neutral-800 p-0.5 rounded-lg border border-neutral-100 dark:border-neutral-700">
               <button 
                 onClick={() => {
                   setEditMode(editMode === 'highlight' ? null : 'highlight');
                   setIsHighlightPopoverOpen(false);
                 }}
                 className={cn(
-                  "p-2 rounded-lg transition-all flex items-center gap-2",
+                  "px-3 py-1.5 rounded-md transition-all flex items-center gap-2",
                   editMode === 'highlight' 
-                    ? "bg-blue-600 text-white shadow-lg shadow-blue-500/20" 
+                    ? "bg-white dark:bg-neutral-700 text-blue-600 shadow-sm" 
                     : "text-neutral-500 hover:bg-neutral-200 dark:hover:bg-neutral-700"
                 )}
                 title="Ferramenta de Destaque (H)"
               >
-                <Highlighter size={20} />
-                <span className="text-xs font-bold uppercase tracking-widest hidden lg:inline">Destaque</span>
+                <Highlighter size={16} />
+                <span className="text-[10px] font-black uppercase tracking-widest">Destaque</span>
+                <div className="w-4 h-4 rounded-full border-2 border-neutral-200 shadow-inner" style={{ backgroundColor: highlightColor }} />
               </button>
-
-              <div className="relative">
-                <button 
-                  onClick={() => setIsHighlightPopoverOpen(!isHighlightPopoverOpen)}
-                  className="p-2 text-neutral-500 hover:bg-neutral-200 dark:hover:bg-neutral-700 rounded-lg transition-all"
-                  style={{ color: highlightColor }}
-                >
-                  <div className="w-5 h-5 rounded-full border-2 border-current" style={{ backgroundColor: highlightColor + '40' }} />
-                </button>
-
-                <AnimatePresence>
-                  {isHighlightPopoverOpen && (
-                    <motion.div 
-                      initial={{ opacity: 0, y: 10, scale: 0.95 }}
-                      animate={{ opacity: 1, y: 0, scale: 1 }}
-                      exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                      className="absolute top-full right-0 mt-2 p-4 bg-white dark:bg-neutral-800 rounded-2xl shadow-2xl border border-neutral-100 dark:border-neutral-700 z-50 min-w-[200px]"
-                    >
-                      <div className="space-y-4">
-                        <div>
-                          <label className="text-[10px] font-black uppercase text-neutral-400 tracking-widest mb-2 block">Cor do Marcador</label>
-                          <div className="grid grid-cols-5 gap-2">
-                            {['#facc15', '#4ade80', '#60a5fa', '#f472b6', '#f87171'].map(color => (
-                              <button
-                                key={color}
-                                onClick={() => {
-                                  setHighlightColor(color);
-                                  if (selectedHighlightId) handleUpdateHighlightColor(selectedHighlightId, color);
-                                }}
-                                className={cn(
-                                  "w-8 h-8 rounded-full transition-all hover:scale-110 active:scale-90",
-                                  highlightColor === color ? "ring-2 ring-blue-500 ring-offset-2 dark:ring-offset-neutral-800" : ""
-                                )}
-                                style={{ backgroundColor: color }}
-                              />
-                            ))}
-                          </div>
-                        </div>
-                        <div>
-                          <label className="text-[10px] font-black uppercase text-neutral-400 tracking-widest mb-2 block">Opacidade: {highlightThickness}%</label>
-                          <input 
-                            type="range" 
-                            min="10" 
-                            max="100" 
-                            value={highlightThickness}
-                            onChange={(e) => setHighlightThickness(parseInt(e.target.value))}
-                            className="w-full accent-blue-600"
-                          />
-                        </div>
-                        <button 
-                          onClick={handleClearAllHighlights}
-                          className="w-full py-2 text-[10px] font-bold text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-all uppercase tracking-widest border border-red-100 dark:border-red-900/30"
-                        >
-                          Limpar Todos
-                        </button>
-                      </div>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-              </div>
             </div>
 
-            <div className="h-6 w-px bg-neutral-200 dark:bg-neutral-800 mx-1" />
-
             <button onClick={handlePrint} className="p-2 text-neutral-500 hover:bg-neutral-100 rounded-lg" title="Imprimir">
-              <Printer size={20} />
+              <Printer size={18} />
             </button>
-
-            <div className="h-6 w-px bg-neutral-200 dark:bg-neutral-800 mx-1" />
 
             <button 
               onClick={handleSave}
-              className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg text-sm font-bold transition-all shadow-sm"
+              className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all shadow-sm"
             >
-              <Download size={18} />
+              <Download size={16} />
               Salvar
             </button>
+          </div>
+
+          {/* Right Section: AI, Admin, Theme, Sidebar, Settings, Logout */}
+          <div className="flex items-center gap-2">
+            {!isOnline && (
+              <div className="flex items-center gap-1.5 px-2 py-1 bg-amber-100 dark:bg-amber-900/30 text-amber-600 rounded-lg text-[10px] font-black uppercase tracking-widest">
+                <EyeOff size={12} />
+                Offline
+              </div>
+            )}
 
             <button 
               onClick={handleAiAnalyze}
-              className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-bold transition-all shadow-sm"
+              className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all shadow-sm"
             >
-              <Brain size={18} />
+              <Brain size={16} />
               Analisar IA
             </button>
 
-            <div className="flex items-center gap-2">
-              {user.role === 'admin' && (
-                <button 
-                  onClick={() => setIsAdminView(true)}
-                  className="p-2 text-neutral-500 hover:text-blue-600 hover:bg-neutral-100 dark:hover:bg-neutral-800 rounded-xl transition-all flex items-center gap-2"
-                  title="Administração"
-                >
-                  <ShieldCheck size={20} />
-                  <span className="text-xs font-bold uppercase tracking-widest hidden md:inline">Admin</span>
-                </button>
-              )}
-              
-              <button 
-                onClick={() => setIsSettingsOpen(true)}
-                className="p-2 text-neutral-500 hover:bg-neutral-100 rounded-lg transition-all"
-                title="Configurações"
-              >
-                <Settings size={20} />
-              </button>
-
-              <button 
-                onClick={handleLogout}
-                className="p-2 text-neutral-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-xl transition-all flex items-center gap-2"
-                title="Sair"
-              >
-                <LogOut size={20} />
-                <span className="text-xs font-bold uppercase tracking-widest hidden md:inline">Sair</span>
-              </button>
-            </div>
-
             <div className="h-6 w-px bg-neutral-200 dark:bg-neutral-800 mx-1" />
+
+            {user.role === 'admin' && (
+              <button 
+                onClick={() => setIsAdminView(true)}
+                className="p-2 text-neutral-500 hover:text-blue-600 hover:bg-neutral-100 dark:hover:bg-neutral-800 rounded-lg transition-all flex items-center gap-2 border border-transparent hover:border-neutral-200 dark:hover:border-neutral-700"
+                title="Administração"
+              >
+                <ShieldCheck size={18} />
+                <span className="text-[10px] font-black uppercase tracking-widest">Admin</span>
+              </button>
+            )}
+
+            <button 
+              onClick={() => setIsDarkMode(!isDarkMode)}
+              className="p-2 text-neutral-500 hover:bg-neutral-100 rounded-lg transition-all"
+              title="Alternar Tema"
+            >
+              {isDarkMode ? <Sun size={18} /> : <Moon size={18} />}
+            </button>
 
             <button 
               onClick={toggleRightSidebar}
               className={cn("p-2 rounded-lg transition-colors", isRightPanelOpen ? "text-blue-600 bg-blue-50" : "text-neutral-500 hover:bg-neutral-100")}
               title={isRightPanelOpen ? "Ocultar Painel" : "Mostrar Painel"}
             >
-              <PanelRight size={20} />
+              <PanelRight size={18} />
+            </button>
+
+            <button 
+              onClick={() => setIsSettingsOpen(true)}
+              className="p-2 text-neutral-500 hover:bg-neutral-100 rounded-lg transition-all"
+              title="Configurações"
+            >
+              <Settings size={18} />
+            </button>
+
+            <button 
+              onClick={handleLogout}
+              className="p-2 text-neutral-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-all flex items-center gap-2"
+              title="Sair"
+            >
+              <LogOut size={18} />
+              <span className="text-[10px] font-black uppercase tracking-widest hidden xl:inline">Sair</span>
             </button>
           </div>
         </header>
 
-        {/* PDF Area */}
-        <div className="flex-1 overflow-hidden relative bg-neutral-100 dark:bg-neutral-950">
+        <div className="flex-1 flex overflow-hidden relative">
+          <main className="flex-1 flex flex-col relative min-w-0">
+            {/* PDF Area */}
+            <div className="flex-1 overflow-hidden relative bg-neutral-100 dark:bg-neutral-950">
           {!pdfUrl ? (
             <div 
               className={cn(
@@ -2371,30 +2368,54 @@ export default function App() {
               onDragLeave={onDragLeave}
               onDrop={onDrop}
             >
+              {showInstallButton && (
+                <motion.div 
+                  initial={{ opacity: 0, y: -20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="mb-6 w-full max-w-xl bg-blue-600 text-white p-4 rounded-2xl flex items-center justify-between shadow-xl shadow-blue-500/20"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-white/20 rounded-xl">
+                      <Download size={20} />
+                    </div>
+                    <div>
+                      <h3 className="text-sm font-black uppercase tracking-widest">Instalar no Desktop</h3>
+                      <p className="text-[10px] opacity-80">Acesse o PDF Master AI direto da sua área de trabalho.</p>
+                    </div>
+                  </div>
+                  <button 
+                    onClick={handleInstallClick}
+                    className="bg-white text-blue-600 px-4 py-2 rounded-xl text-xs font-black uppercase tracking-widest hover:bg-blue-50 transition-all active:scale-95"
+                  >
+                    Instalar Agora
+                  </button>
+                </motion.div>
+              )}
+
               <motion.div 
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="max-w-xl w-full bg-white dark:bg-neutral-900 p-6 md:p-12 rounded-[2rem] md:rounded-[2.5rem] shadow-[0_30px_60px_rgba(0,0,0,0.1)] dark:shadow-[0_30px_60px_rgba(0,0,0,0.4)] border border-neutral-100 dark:border-neutral-800 flex flex-col items-center"
+                className="max-w-xl w-full bg-white dark:bg-neutral-900 p-8 md:p-16 rounded-[3rem] shadow-[0_40px_80px_rgba(0,0,0,0.08)] dark:shadow-[0_40px_80px_rgba(0,0,0,0.3)] border border-neutral-100 dark:border-neutral-800 flex flex-col items-center text-center"
               >
                 <div className={cn(
-                  "w-16 h-16 md:w-24 md:h-24 rounded-2xl md:rounded-3xl flex items-center justify-center mb-6 md:mb-8 transition-all duration-500",
-                  isDragging || isUploading ? "bg-blue-600 text-white rotate-12 scale-110" : "bg-blue-50 dark:bg-blue-900/30 text-blue-600"
+                  "w-20 h-20 md:w-28 md:h-28 rounded-[2rem] flex items-center justify-center mb-8 md:mb-10 transition-all duration-500 shadow-xl shadow-blue-500/10",
+                  isDragging || isUploading ? "bg-blue-600 text-white rotate-12 scale-110" : "bg-blue-50 dark:bg-blue-900/20 text-blue-600"
                 )}>
-                  {isUploading ? <Loader2 size={32} className="animate-spin" /> : <FileText size={32} className="md:w-12 md:h-12" />}
+                  {isUploading ? <Loader2 size={40} className="animate-spin" /> : <FileText size={40} className="md:w-14 md:h-14" />}
                 </div>
                 
-                <h1 className="text-2xl md:text-3xl font-black mb-3 md:mb-4 tracking-tight">PDF Master AI</h1>
-                <p className="text-sm md:text-base text-neutral-500 dark:text-neutral-400 mb-8 md:mb-10 leading-relaxed">
+                <h1 className="text-3xl md:text-4xl font-black mb-4 md:mb-6 tracking-tight text-neutral-900 dark:text-white">PDF Master AI</h1>
+                <p className="text-base md:text-lg text-neutral-500 dark:text-neutral-400 mb-10 md:mb-12 leading-relaxed max-w-md">
                   Arraste seu PDF aqui ou clique para explorar documentos com inteligência artificial avançada.
                 </p>
                 
                 {isUploading ? (
-                  <div className="w-full max-w-xs space-y-3">
+                  <div className="w-full max-w-xs space-y-4">
                     <div className="flex justify-between items-center text-[10px] font-black uppercase tracking-widest text-blue-600">
                       <span>Enviando Documento</span>
                       <span>{uploadProgress}%</span>
                     </div>
-                    <div className="h-2 w-full bg-neutral-100 dark:bg-neutral-800 rounded-full overflow-hidden">
+                    <div className="h-2.5 w-full bg-neutral-100 dark:bg-neutral-800 rounded-full overflow-hidden">
                       <motion.div 
                         className="h-full bg-blue-600"
                         initial={{ width: 0 }}
@@ -2402,23 +2423,35 @@ export default function App() {
                         transition={{ type: "spring", bounce: 0, duration: 0.3 }}
                       />
                     </div>
-                    <p className="text-[10px] text-neutral-400 italic">Por favor, aguarde enquanto processamos seu arquivo...</p>
+                    <p className="text-[10px] text-neutral-400 italic font-medium">Por favor, aguarde enquanto processamos seu arquivo...</p>
                   </div>
                 ) : (
-                  <label 
-                    htmlFor="pdf-upload-input"
-                    className="group relative cursor-pointer overflow-hidden bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 px-8 md:px-10 py-3 md:py-4 rounded-xl md:rounded-2xl font-bold transition-all hover:scale-105 active:scale-95 shadow-xl shadow-black/10 dark:shadow-white/10"
-                  >
-                    <span className="relative z-10 text-sm md:text-base">Selecionar Documento</span>
-                    <div className="absolute inset-0 bg-blue-600 translate-y-full transition-transform group-hover:translate-y-0" />
-                    <input 
-                      id="pdf-upload-input"
-                      type="file" 
-                      accept=".pdf" 
-                      className="absolute inset-0 opacity-0 cursor-pointer" 
-                      onChange={handleFileUpload} 
-                    />
-                  </label>
+                  <div className="flex flex-col items-center gap-6">
+                    <label 
+                      htmlFor="pdf-upload-input"
+                      className="group relative cursor-pointer overflow-hidden bg-blue-600 text-white px-10 md:px-12 py-4 md:py-5 rounded-2xl font-black uppercase tracking-widest transition-all hover:scale-105 active:scale-95 shadow-2xl shadow-blue-600/20"
+                    >
+                      <span className="relative z-10 text-xs md:text-sm">Selecionar Documento</span>
+                      <div className="absolute inset-0 bg-blue-700 translate-y-full transition-transform group-hover:translate-y-0" />
+                      <input 
+                        id="pdf-upload-input"
+                        type="file" 
+                        accept=".pdf" 
+                        className="absolute inset-0 opacity-0 cursor-pointer" 
+                        onChange={handleFileUpload} 
+                      />
+                    </label>
+
+                    {showInstallButton && (
+                      <button 
+                        onClick={handleInstallClick}
+                        className="flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-blue-600 dark:text-blue-400 hover:text-blue-700 transition-all"
+                      >
+                        <Download size={14} />
+                        Instalar no Computador
+                      </button>
+                    )}
+                  </div>
                 )}
                 
                 <div className="mt-8 md:mt-12 flex flex-wrap justify-center items-center gap-4 md:gap-8 text-[10px] font-bold uppercase tracking-widest text-neutral-400">
@@ -2753,7 +2786,7 @@ export default function App() {
             </div>
           )}
         </div>
-      </main>
+          </main>
 
       {/* Right Resize Handle */}
       {isRightPanelOpen && !isMobile && (
@@ -2764,15 +2797,15 @@ export default function App() {
       )}
 
       {/* Right Panel: Tools & AI */}
-      <div 
-        id="right-sidebar"
-        className={cn(
-          "sidebar border-l border-neutral-200 dark:border-neutral-800 flex flex-col bg-white dark:bg-neutral-900 z-[60] relative transition-all duration-300 ease-in-out",
-          !isRightPanelOpen && "hidden-right",
-          isMobile && "fixed inset-y-0 right-0 shadow-2xl"
-        )}
-        style={{ width: isRightPanelOpen ? rightPanelWidth : 0 }}
-      >
+          <div 
+            id="right-sidebar"
+            className={cn(
+              "sidebar border-l border-neutral-200 dark:border-neutral-800 flex flex-col bg-white dark:bg-neutral-900 z-[60] relative transition-all duration-300 ease-in-out",
+              !isRightPanelOpen && "hidden-right",
+              isMobile && "fixed inset-y-0 right-0 shadow-2xl"
+            )}
+            style={{ width: isRightPanelOpen ? rightPanelWidth : 0 }}
+          >
         <div className="flex border-b border-neutral-100 dark:border-neutral-800 items-center bg-neutral-50 dark:bg-neutral-900/50">
           <div className="flex-1 flex">
             {(['search', 'ai', 'history'] as const).map((tab) => (
@@ -2790,7 +2823,7 @@ export default function App() {
                 {tab === 'search' && <Search size={18} />}
                 {tab === 'ai' && <Brain size={18} />}
                 {tab === 'history' && <FileText size={18} />}
-                <span className="text-[10px] uppercase font-bold tracking-widest">
+                <span className="text-[10px] uppercase font-black tracking-widest">
                   {tab === 'search' ? 'BUSCA' : tab === 'ai' ? 'ANÁLISE IA' : 'HISTÓRICO'}
                 </span>
                 {activeTab === tab && (
@@ -2927,8 +2960,8 @@ export default function App() {
                 )}
               </AnimatePresence>
             </div>
-      </div>
-
+          </div>
+        </div>
     </div>
   );
 }

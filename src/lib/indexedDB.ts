@@ -1,7 +1,7 @@
 
 const DB_NAME = 'PDFMasterAI_DB';
 const DB_VERSION = 1;
-const STORE_NAME = 'documents';
+export const STORE_NAME = 'documents';
 
 export interface LocalDocument {
   id: string;

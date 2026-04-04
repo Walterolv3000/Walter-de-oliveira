@@ -117,6 +117,7 @@ function loadDB() {
 }
 
 function saveDB() {
+  if (isCloudRun || process.env.VERCEL) return;
   try {
     fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2));
   } catch (err) {
@@ -294,13 +295,17 @@ const isAdmin = (req: AuthRequest, res: express.Response, next: express.NextFunc
 
 // Request logger for debugging
 app.use((req, res, next) => {
-  const log = `${new Date().toISOString()} - ${req.method} ${req.url}`;
-  console.log(log); // Log to console for build logs
-  try {
-    fs.appendFileSync("server.log", log + '\n');
-  } catch (e) {
-    // Ignore log write errors
-  }
+  const start = Date.now();
+  res.on('finish', () => {
+    const duration = Date.now() - start;
+    const log = `${new Date().toISOString()} - ${req.method} ${req.url} - ${res.statusCode} - ${duration}ms`;
+    console.log(log); // Log to console for build logs
+    try {
+      fs.appendFileSync("server.log", log + '\n');
+    } catch (e) {
+      // Ignore log write errors
+    }
+  });
   next();
 });
 
@@ -866,7 +871,9 @@ app.delete(["/api/documents", "/api/documents/"], authenticateToken, isAdmin, as
         docs.forEach((doc: any) => {
           const filePath = path.join(uploadsDir, doc.path);
           if (fs.existsSync(filePath)) {
-            fs.unlinkSync(filePath);
+            try {
+              fs.unlinkSync(filePath);
+            } catch (e) {}
           }
         });
       }
@@ -874,11 +881,16 @@ app.delete(["/api/documents", "/api/documents/"], authenticateToken, isAdmin, as
       await supabase.from('annotations').delete().neq('id', '00000000-0000-0000-0000-000000000000');
       await supabase.from('favorites').delete().neq('id', '00000000-0000-0000-0000-000000000000');
       await supabase.from('documents').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-    } else {
+    }
+
+    // Always clear local DB as well if it has anything
+    if (db.documents && db.documents.length > 0) {
       db.documents.forEach((doc: any) => {
         const filePath = path.join(uploadsDir, doc.path);
         if (fs.existsSync(filePath)) {
-          fs.unlinkSync(filePath);
+          try {
+            fs.unlinkSync(filePath);
+          } catch (e) {}
         }
       });
 
@@ -895,27 +907,44 @@ app.delete(["/api/documents", "/api/documents/"], authenticateToken, isAdmin, as
   }
 });
 
-app.delete(["/api/documents/:id", "/api/documents/:id/"], authenticateToken, async (req, res) => {
+app.delete(["/api/documents/:id", "/api/documents/:id/"], authenticateToken, async (req: any, res) => {
   const { id } = req.params;
+  const userId = req.user.id;
+  const isAdmin = req.user.role === 'admin';
+
   try {
     let docPath: string | null = null;
+    let foundInSupabase = false;
 
     if (isSupabaseConfigured) {
       const { data, error } = await supabase
         .from('documents')
-        .select('path')
+        .select('path, user_id')
         .eq('id', id)
         .single();
       
-      if (error) return res.status(404).json({ error: "Documento não encontrado" });
-      docPath = data.path;
+      if (!error && data) {
+        // Check ownership
+        if (!isAdmin && data.user_id !== userId) {
+          return res.status(403).json({ error: "Acesso negado" });
+        }
+        docPath = data.path;
+        await supabase.from('documents').delete().eq('id', id);
+        foundInSupabase = true;
+      }
+    }
 
-      await supabase.from('documents').delete().eq('id', id);
-    } else {
+    if (!foundInSupabase) {
+      if (!db.documents) db.documents = [];
       const doc = db.documents.find((d: any) => d.id === id);
       if (!doc) return res.status(404).json({ error: "Documento não encontrado" });
+      
+      // Check ownership for local DB
+      if (!isAdmin && doc.user_id !== userId) {
+        return res.status(403).json({ error: "Acesso negado" });
+      }
+      
       docPath = doc.path;
-
       db.documents = db.documents.filter((d: any) => d.id !== id);
       db.annotations = db.annotations.filter((a: any) => a.document_id !== id);
       db.favorites = db.favorites.filter((f: any) => f.document_id !== id);
@@ -926,7 +955,12 @@ app.delete(["/api/documents/:id", "/api/documents/:id/"], authenticateToken, asy
     if (docPath) {
       const filePath = path.join(uploadsDir, docPath);
       if (fs.existsSync(filePath)) {
-        fs.unlinkSync(filePath);
+        try {
+          fs.unlinkSync(filePath);
+        } catch (unlinkErr) {
+          console.error(`Failed to delete file ${filePath}:`, unlinkErr);
+          // We don't fail the whole request if file deletion fails (e.g. read-only FS)
+        }
       }
     }
 
@@ -972,11 +1006,13 @@ app.get(["/api/documents/:id/pdf", "/api/documents/:id/pdf/"], authenticateToken
         .eq('id', id)
         .single();
       
-      if (error) {
-        console.error(`[404] Supabase error for ID ${id}:`, error);
-        return res.status(404).json({ error: "Documento não encontrado no banco de dados" });
+      if (!error && data) {
+        doc = data;
+      } else {
+        console.log(`[Info] Document ${id} not found in Supabase, checking local DB`);
+        if (!db.documents) db.documents = [];
+        doc = db.documents.find((d: any) => d.id === id);
       }
-      doc = data;
     } else {
       if (!db.documents) db.documents = [];
       doc = db.documents.find((d: any) => d.id === id);
@@ -1157,16 +1193,16 @@ app.delete(["/api/documents/:id/annotations", "/api/documents/:id/annotations/"]
   const { id } = req.params;
   try {
     if (isSupabaseConfigured) {
-      const { error } = await supabase
+      await supabase
         .from('annotations')
         .delete()
         .eq('document_id', id);
-      
-      if (error) throw error;
-    } else {
-      db.annotations = db.annotations.filter((a: any) => a.document_id !== id);
-      saveDB();
     }
+    
+    // Always clear local DB as well
+    db.annotations = db.annotations.filter((a: any) => a.document_id !== id);
+    saveDB();
+    
     res.json({ success: true });
   } catch (err) {
     console.error("Clear annotations error:", err);
@@ -1330,16 +1366,16 @@ app.delete(["/api/documents/:id/favorites/:favoriteId", "/api/documents/:id/favo
   const { favoriteId } = req.params;
   try {
     if (isSupabaseConfigured) {
-      const { error } = await supabase
+      await supabase
         .from('favorites')
         .delete()
         .eq('id', favoriteId);
-      
-      if (error) throw error;
-    } else {
-      db.favorites = db.favorites.filter((f: any) => f.id !== favoriteId);
-      saveDB();
     }
+    
+    // Always clear local DB as well
+    db.favorites = db.favorites.filter((f: any) => f.id !== favoriteId);
+    saveDB();
+    
     res.json({ success: true });
   } catch (err) {
     console.error("Delete favorite error:", err);

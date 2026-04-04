@@ -4,9 +4,21 @@
   "description": "Análise inteligente de documentos PDF com IA e indexação local rápida.",
   "start_url": "/",
   "display": "standalone",
+  "display_override": ["window-controls-overlay", "minimal-ui"],
   "background_color": "#ffffff",
   "theme_color": "#2563eb",
   "orientation": "any",
+  "categories": ["productivity", "utilities"],
+  "prefer_related_applications": false,
+  "shortcuts": [
+    {
+      "name": "Nova Análise",
+      "short_name": "Novo",
+      "description": "Iniciar uma nova análise de PDF",
+      "url": "/",
+      "icons": [{ "src": "https://cdn-icons-png.flaticon.com/512/337/337946.png", "sizes": "192x192" }]
+    }
+  ],
   "icons": [
     {
       "src": "/favicon.ico",
@@ -15,9 +27,31 @@
     },
     {
       "src": "https://cdn-icons-png.flaticon.com/512/337/337946.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "https://cdn-icons-png.flaticon.com/512/337/337946.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any maskable"
+    }
+  ],
+  "screenshots": [
+    {
+      "src": "https://picsum.photos/seed/pdfmaster1/1280/720",
+      "sizes": "1280x720",
+      "type": "image/jpeg",
+      "form_factor": "wide",
+      "label": "Interface Principal"
+    },
+    {
+      "src": "https://picsum.photos/seed/pdfmaster2/720/1280",
+      "sizes": "720x1280",
+      "type": "image/jpeg",
+      "form_factor": "narrow",
+      "label": "Versão Mobile"
     }
   ]
 }
