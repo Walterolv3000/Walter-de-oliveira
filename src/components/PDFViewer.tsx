@@ -103,19 +103,20 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({
         setPdf(pdfDoc);
         console.log("PDF loaded successfully, pages:", pdfDoc.numPages);
 
-        // Extract text and thumbnails in background
+        // Extract text and thumbnails in background with idle priority
         const extractData = async () => {
           let fullText = "";
           const thumbs: string[] = new Array(pdfDoc.numPages).fill("");
           const pageTexts: string[] = new Array(pdfDoc.numPages).fill("");
           
-          // Process pages in batches of 5 for better performance
-          const batchSize = 5;
-          for (let i = 1; i <= pdfDoc.numPages; i += batchSize) {
-            if (!isMounted) break;
+          // Process pages in batches for better performance
+          const batchSize = 3; // Smaller batch for smoother UI
+          
+          const processBatch = async (startPage: number) => {
+            if (!isMounted) return;
             
             const batch = [];
-            for (let j = i; j < i + batchSize && j <= pdfDoc.numPages; j++) {
+            for (let j = startPage; j < startPage + batchSize && j <= pdfDoc.numPages; j++) {
               batch.push(j);
             }
             
@@ -126,30 +127,47 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({
                 const pageText = (textContent.items || []).map((item: any) => item.str).join(" ");
                 pageTexts[pageNum - 1] = pageText;
 
-                // Thumbnail generation - only for first 50 pages to save memory
-                if (pageNum <= 50) {
-                  const viewport = page.getViewport({ scale: 0.2 });
+                // Thumbnail generation - only for first 100 pages to save memory on desktop
+                if (pageNum <= 100) {
+                  const viewport = page.getViewport({ scale: 0.15 }); // Slightly smaller for performance
                   const canvas = document.createElement('canvas');
-                  const context = canvas.getContext('2d');
+                  const context = canvas.getContext('2d', { alpha: false }); // Optimization
                   if (context) {
                     canvas.height = viewport.height;
                     canvas.width = viewport.width;
-                    await page.render({ canvasContext: context, viewport, canvas }).promise;
-                    thumbs[pageNum - 1] = canvas.toDataURL('image/jpeg', 0.7);
+                    await page.render({ 
+                      canvasContext: context, 
+                      viewport, 
+                      canvas,
+                      intent: 'display'
+                    }).promise;
+                    thumbs[pageNum - 1] = canvas.toDataURL('image/jpeg', 0.5); // Lower quality for speed
                   }
                 }
               } catch (pageErr) {
                 console.warn(`Error extracting page ${pageNum}:`, pageErr);
-                pageTexts[pageNum - 1] = "[Erro ao extrair texto desta página]";
+                pageTexts[pageNum - 1] = "[Erro ao extrair texto]";
               }
             }));
-          }
-          
-          if (isMounted) {
-            fullText = pageTexts.map((text, i) => `\n--- Page ${i + 1} ---\n${text}`).join("");
-            onTextExtract?.(fullText);
-            onThumbnailsGenerated?.(thumbs);
-          }
+
+            if (startPage + batchSize <= pdfDoc.numPages) {
+              // Schedule next batch on next idle period
+              if ('requestIdleCallback' in window) {
+                (window as any).requestIdleCallback(() => processBatch(startPage + batchSize));
+              } else {
+                setTimeout(() => processBatch(startPage + batchSize), 50);
+              }
+            } else {
+              // Finished all pages
+              if (isMounted) {
+                fullText = pageTexts.map((text, i) => `\n--- Page ${i + 1} ---\n${text}`).join("");
+                onTextExtract?.(fullText);
+                onThumbnailsGenerated?.(thumbs);
+              }
+            }
+          };
+
+          processBatch(1);
         };
 
         extractData();

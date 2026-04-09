@@ -189,20 +189,6 @@ export default function App() {
     };
   }, []);
 
-  // Show installer after login if available
-  useEffect(() => {
-    if (user && !isStandalone) {
-      const hasSeenInstaller = sessionStorage.getItem('has_seen_pwa_installer');
-      if (!hasSeenInstaller) {
-        const timer = setTimeout(() => {
-          setShowInstallerModal(true);
-          sessionStorage.setItem('has_seen_pwa_installer', 'true');
-        }, 1500);
-        return () => clearTimeout(timer);
-      }
-    }
-  }, [user, isStandalone]);
-
   const handleInstallApp = async () => {
     if (!deferredPrompt) {
       // If no prompt, we show the modal with manual instructions
@@ -1958,7 +1944,6 @@ export default function App() {
       <Login 
         onLogin={handleLogin} 
         onInstall={handleInstallApp}
-        isInstallSupported={!!deferredPrompt}
         isStandalone={isStandalone}
       />
     );
@@ -2465,30 +2450,6 @@ export default function App() {
               onDragLeave={onDragLeave}
               onDrop={onDrop}
             >
-              {!!deferredPrompt && !isStandalone && (
-                <motion.div 
-                  initial={{ opacity: 0, y: -20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  className="mb-6 w-full max-w-xl bg-emerald-600 text-white p-4 rounded-2xl flex items-center justify-between shadow-xl shadow-emerald-500/20 border border-emerald-500/30"
-                >
-                  <div className="flex items-center gap-3">
-                    <div className="p-2 bg-white/20 rounded-xl">
-                      <Download size={20} />
-                    </div>
-                    <div className="text-left">
-                      <h3 className="text-sm font-black uppercase tracking-widest">Instalar no Desktop e Barra de Tarefas</h3>
-                      <p className="text-[10px] opacity-80">Acesse o PDF Master AI direto da sua área de trabalho e barra de tarefas para produtividade máxima.</p>
-                    </div>
-                  </div>
-                  <button 
-                    onClick={handleInstallApp}
-                    className="bg-white text-emerald-600 px-4 py-2 rounded-xl text-xs font-black uppercase tracking-widest hover:bg-emerald-50 transition-all active:scale-95 whitespace-nowrap ml-4"
-                  >
-                    Instalar Agora
-                  </button>
-                </motion.div>
-              )}
-
               <motion.div 
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'pdf-master-ai-v9';
+const CACHE_NAME = 'pdf-master-ai-v10-desktop';
 const ASSETS_TO_CACHE = [
   './',
   'index.html',

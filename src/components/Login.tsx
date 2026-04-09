@@ -6,11 +6,10 @@ import { cn } from '../lib/utils';
 interface LoginProps {
   onLogin: (token: string, user: any) => void;
   onInstall?: () => void;
-  isInstallSupported?: boolean;
   isStandalone?: boolean;
 }
 
-export const Login: React.FC<LoginProps> = ({ onLogin, onInstall, isInstallSupported, isStandalone }) => {
+export const Login: React.FC<LoginProps> = ({ onLogin, onInstall, isStandalone }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -202,16 +201,18 @@ export const Login: React.FC<LoginProps> = ({ onLogin, onInstall, isInstallSuppo
             >
               Acesso Rápido (Convidado)
             </button>
-
-            {onInstall && !isStandalone && (
-              <button 
-                type="button"
-                onClick={onInstall}
-                className="w-full bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-emerald-100 dark:hover:bg-emerald-800 transition-all flex items-center justify-center gap-2 border border-emerald-100 dark:border-emerald-800 mt-2"
-              >
-                <Download size={14} />
-                Instalar PDF Master AI no PC
-              </button>
+            
+            {!isStandalone && (
+              <div className="mt-4 pt-4 border-t border-neutral-100 dark:border-neutral-800">
+                <button 
+                  type="button"
+                  onClick={onInstall}
+                  className="w-full bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400 py-3 rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-neutral-200 dark:hover:bg-neutral-700 transition-all flex items-center justify-center gap-2"
+                >
+                  <Download size={14} />
+                  Instalar como Aplicativo
+                </button>
+              </div>
             )}
           </form>
 

@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Download, X, Monitor, Smartphone, CheckCircle2, ArrowRight, ShieldCheck, Zap, Layout, Copy, Check } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Download, X, Monitor, Smartphone, CheckCircle2, ArrowRight, ShieldCheck, Zap, Layout, Copy, Check, Info, Globe } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../lib/utils';
 
@@ -13,6 +13,15 @@ interface PWAInstallerModalProps {
 export function PWAInstallerModal({ isOpen, onClose, onInstall, isInstallSupported }: PWAInstallerModalProps) {
   const [step, setStep] = useState(1);
   const [copied, setCopied] = useState(false);
+  const [browserInfo, setBrowserInfo] = useState({ name: 'Navegador', icon: <Globe size={16} /> });
+
+  useEffect(() => {
+    const ua = navigator.userAgent;
+    if (/CriOS|Chrome/.test(ua)) setBrowserInfo({ name: 'Chrome', icon: <Globe className="text-blue-500" size={16} /> });
+    else if (/Safari/.test(ua)) setBrowserInfo({ name: 'Safari', icon: <Globe className="text-blue-400" size={16} /> });
+    else if (/Firefox/.test(ua)) setBrowserInfo({ name: 'Firefox', icon: <Globe className="text-orange-500" size={16} /> });
+    else if (/Edg/.test(ua)) setBrowserInfo({ name: 'Edge', icon: <Globe className="text-blue-600" size={16} /> });
+  }, []);
 
   const copyLink = () => {
     navigator.clipboard.writeText(window.location.origin);
@@ -27,25 +36,38 @@ export function PWAInstallerModal({ isOpen, onClose, onInstall, isInstallSupport
     const isAndroid = /Android/.test(ua);
     const isFirefox = /Firefox/.test(ua);
     const isSafari = /Safari/.test(ua) && !/Chrome/.test(ua);
+    const isChromeIOS = /CriOS/.test(ua);
+    const isEdgeIOS = /EdgiOS/.test(ua);
     
     if (isIOS) {
+      if (isChromeIOS || isEdgeIOS) {
+        return {
+          title: "Instalação no iPhone/iPad (Chrome/Edge)",
+          steps: [
+            "Toque no ícone de Compartilhar (quadrado com seta) na barra de endereços.",
+            "Role para baixo e toque em 'Adicionar à Tela de Início'.",
+            "Toque em 'Adicionar' para confirmar."
+          ]
+        };
+      }
       return {
         title: "Instalação no iPhone/iPad (Safari)",
         steps: [
-          "Toque no ícone de Compartilhar (quadrado com seta para cima).",
-          "Role para baixo e toque em 'Adicionar à Tela de Início'.",
-          "Confirme o nome e toque em 'Adicionar'."
+          "Toque no ícone de Compartilhar (quadrado com seta para cima) na barra inferior.",
+          "Role a lista de opções para baixo.",
+          "Toque em 'Adicionar à Tela de Início'.",
+          "Confirme tocando em 'Adicionar' no canto superior."
         ]
       };
     }
     
     if (isAndroid) {
       return {
-        title: "Instalação no Android (Chrome/Edge)",
+        title: "Instalação no Android",
         steps: [
-          "Toque nos três pontos (menu) no canto superior direito.",
+          "Toque nos três pontos (⋮) no canto superior direito.",
           "Selecione 'Instalar Aplicativo' ou 'Adicionar à tela inicial'.",
-          "Confirme a instalação."
+          "Aguarde o download e confirme a instalação."
         ]
       };
     }
@@ -54,9 +76,10 @@ export function PWAInstallerModal({ isOpen, onClose, onInstall, isInstallSupport
       return {
         title: "Instalação no Mac (Safari)",
         steps: [
-          "Vá no menu superior em 'Arquivo'.",
-          "Selecione 'Adicionar ao Dock'.",
-          "O app aparecerá no seu Dock e Launchpad."
+          "Vá ao menu 'Arquivo' no topo da tela.",
+          "Selecione a opção 'Adicionar ao Dock...'.",
+          "Confirme o nome do aplicativo e clique em 'Adicionar'.",
+          "O app agora funcionará como um programa independente."
         ]
       };
     }
@@ -66,8 +89,8 @@ export function PWAInstallerModal({ isOpen, onClose, onInstall, isInstallSupport
         title: "Instalação no Firefox",
         steps: [
           "O Firefox Desktop não suporta PWAs nativamente.",
-          "Recomendamos usar Chrome ou Edge para instalar como App.",
-          "No Android, use o menu 'Instalar' do Firefox."
+          "Recomendamos usar Chrome, Edge ou Brave para instalar como App.",
+          "No Android: Toque no menu (⋮) e selecione 'Instalar'."
         ]
       };
     }
@@ -75,7 +98,7 @@ export function PWAInstallerModal({ isOpen, onClose, onInstall, isInstallSupport
     return {
       title: "Instalação Manual",
       steps: [
-        "Procure pelo ícone de instalação (computador com seta) na barra de endereços.",
+        "Procure pelo ícone de instalação (⊕ ou computador com seta) na barra de endereços.",
         "Ou abra o menu do navegador (três pontos ou barras).",
         "Selecione 'Instalar PDF Master AI' ou 'Adicionar à tela inicial'."
       ]
@@ -101,7 +124,14 @@ export function PWAInstallerModal({ isOpen, onClose, onInstall, isInstallSupport
                   </div>
                   <div>
                     <h2 className="text-xl font-black uppercase tracking-tight text-neutral-900 dark:text-white">Assistente de Instalação</h2>
-                    <p className="text-[10px] font-black uppercase tracking-widest text-neutral-400">PDF Master AI v4.0</p>
+                    <div className="flex items-center gap-2">
+                      <p className="text-[10px] font-black uppercase tracking-widest text-neutral-400">PDF Master AI v4.0</p>
+                      <div className="w-1 h-1 rounded-full bg-neutral-300 dark:bg-neutral-700" />
+                      <div className="flex items-center gap-1 px-1.5 py-0.5 bg-neutral-100 dark:bg-neutral-800 rounded-md border border-neutral-200 dark:border-neutral-700">
+                        {browserInfo.icon}
+                        <span className="text-[8px] font-black uppercase tracking-widest text-neutral-500">{browserInfo.name}</span>
+                      </div>
+                    </div>
                   </div>
                 </div>
                 <button
@@ -138,8 +168,8 @@ export function PWAInstallerModal({ isOpen, onClose, onInstall, isInstallSupport
                             <Monitor size={20} />
                           </div>
                           <div>
-                            <p className="text-xs font-black uppercase tracking-widest text-neutral-900 dark:text-white">Desktop e Barra de Tarefas</p>
-                            <p className="text-[10px] text-neutral-500">Crie um atalho na sua área de trabalho e fixe na barra de tarefas.</p>
+                            <p className="text-xs font-black uppercase tracking-widest text-neutral-900 dark:text-white">Desempenho Máximo no PC</p>
+                            <p className="text-[10px] text-neutral-500">Otimizado para hardware desktop com renderização acelerada.</p>
                           </div>
                         </div>
                         <div className="flex items-center gap-4 p-4 rounded-2xl bg-neutral-50 dark:bg-neutral-800/50 border border-neutral-100 dark:border-neutral-800">
@@ -207,11 +237,22 @@ export function PWAInstallerModal({ isOpen, onClose, onInstall, isInstallSupport
                         )}
                       </div>
 
-                      <div className="p-4 rounded-2xl bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-800 flex items-center gap-3 text-left">
-                        <ShieldCheck className="text-blue-600 shrink-0" size={24} />
-                        <p className="text-[10px] text-blue-800 dark:text-blue-300 font-medium">
-                          Este aplicativo é seguro e verificado. Ele não terá acesso aos seus arquivos pessoais sem sua permissão explícita.
-                        </p>
+                      <div className="p-4 rounded-2xl bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-800 flex flex-col gap-3">
+                        <div className="flex items-center gap-3 text-left">
+                          <ShieldCheck className="text-blue-600 shrink-0" size={24} />
+                          <p className="text-[10px] text-blue-800 dark:text-blue-300 font-medium">
+                            Este aplicativo é seguro e verificado. Ele não terá acesso aos seus arquivos pessoais sem sua permissão explícita.
+                          </p>
+                        </div>
+                        
+                        {browserInfo.name === 'Safari' && (
+                          <div className="flex items-center gap-2 p-2 bg-amber-50 dark:bg-amber-900/20 border border-amber-100 dark:border-amber-800 rounded-xl">
+                            <Info className="text-amber-600 shrink-0" size={14} />
+                            <p className="text-[9px] text-amber-800 dark:text-amber-300 font-bold uppercase tracking-wider">
+                              Dica: No Safari, use "Arquivo" &gt; "Adicionar ao Dock" para a melhor experiência.
+                            </p>
+                          </div>
+                        )}
                       </div>
                     </motion.div>
                   )}
@@ -248,6 +289,26 @@ export function PWAInstallerModal({ isOpen, onClose, onInstall, isInstallSupport
                     )}
                   </>
                 )}
+                
+                <div className="flex items-center justify-center gap-4 py-2 border-t border-neutral-100 dark:border-neutral-800 mt-2">
+                  <div className="flex items-center gap-1 opacity-40 grayscale hover:grayscale-0 hover:opacity-100 transition-all cursor-help" title="Compatível com Chrome">
+                    <Globe size={12} className="text-blue-500" />
+                    <span className="text-[8px] font-bold">Chrome</span>
+                  </div>
+                  <div className="flex items-center gap-1 opacity-40 grayscale hover:grayscale-0 hover:opacity-100 transition-all cursor-help" title="Compatível com Safari">
+                    <Globe size={12} className="text-blue-400" />
+                    <span className="text-[8px] font-bold">Safari</span>
+                  </div>
+                  <div className="flex items-center gap-1 opacity-40 grayscale hover:grayscale-0 hover:opacity-100 transition-all cursor-help" title="Compatível com Edge">
+                    <Globe size={12} className="text-blue-600" />
+                    <span className="text-[8px] font-bold">Edge</span>
+                  </div>
+                  <div className="flex items-center gap-1 opacity-40 grayscale hover:grayscale-0 hover:opacity-100 transition-all cursor-help" title="Compatível com Opera">
+                    <Globe size={12} className="text-red-500" />
+                    <span className="text-[8px] font-bold">Opera</span>
+                  </div>
+                </div>
+
                 <button
                   onClick={onClose}
                   className="w-full py-3 text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 font-black uppercase tracking-widest text-[10px] transition-colors"
