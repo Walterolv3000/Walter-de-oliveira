@@ -23,6 +23,7 @@ import { Toast, ToastType } from './components/Toast';
 import { editPdf } from './services/pdfService';
 import { cn } from './lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
+import { PWAInstallerModal } from './components/PWAInstallerModal';
 import { Login } from './components/Login';
 import { AdminDashboard } from './components/AdminDashboard';
 import { LogOut, ShieldCheck } from 'lucide-react';
@@ -134,19 +135,110 @@ export default function App() {
   const [isAdminView, setIsAdminView] = useState(false);
   const [isAuthLoading, setIsAuthLoading] = useState(true);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
+  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+  const [showInstallerModal, setShowInstallerModal] = useState(false);
+  const [isStandalone, setIsStandalone] = useState(false);
 
   useEffect(() => {
-    const handleOnline = () => setIsOnline(true);
-    const handleOffline = () => setIsOnline(false);
+    // Set PDF.js worker once
+    pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
+    
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.ready.then(registration => {
+        console.log('PWA: Service Worker is ready:', registration.active?.state);
+      }).catch(err => {
+        console.error('PWA: Service Worker ready check failed:', err);
+      });
+    }
+    
+    const checkStandalone = () => {
+      const isStandaloneMode = window.matchMedia('(display-mode: standalone)').matches || (window.navigator as any).standalone === true;
+      setIsStandalone(isStandaloneMode);
+      console.log('PWA: Standalone check:', isStandaloneMode);
+    };
+    checkStandalone();
+    window.addEventListener('resize', checkStandalone);
+    return () => window.removeEventListener('resize', checkStandalone);
+  }, []);
 
-    window.addEventListener('online', handleOnline);
-    window.addEventListener('offline', handleOffline);
+  useEffect(() => {
+    // Check for global deferredPrompt captured in main.tsx
+    if ((window as any).deferredPrompt) {
+      setDeferredPrompt((window as any).deferredPrompt);
+      console.log('PWA: Using globally captured deferredPrompt');
+    }
+
+    const handleBeforeInstallPrompt = (e: any) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+      console.log('PWA: beforeinstallprompt event fired');
+    };
+
+    const handleAppInstalled = () => {
+      setDeferredPrompt(null);
+      setShowInstallerModal(false);
+      console.log('PWA: installed successfully');
+    };
+
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    window.addEventListener('appinstalled', handleAppInstalled);
 
     return () => {
-      window.removeEventListener('online', handleOnline);
-      window.removeEventListener('offline', handleOffline);
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+      window.removeEventListener('appinstalled', handleAppInstalled);
     };
   }, []);
+
+  // Show installer after login if available
+  useEffect(() => {
+    if (user && !isStandalone) {
+      const hasSeenInstaller = sessionStorage.getItem('has_seen_pwa_installer');
+      if (!hasSeenInstaller) {
+        const timer = setTimeout(() => {
+          setShowInstallerModal(true);
+          sessionStorage.setItem('has_seen_pwa_installer', 'true');
+        }, 1500);
+        return () => clearTimeout(timer);
+      }
+    }
+  }, [user, isStandalone]);
+
+  const handleInstallApp = async () => {
+    if (!deferredPrompt) {
+      // If no prompt, we show the modal with manual instructions
+      setShowInstallerModal(true);
+      return;
+    }
+    deferredPrompt.prompt();
+    const { outcome } = await deferredPrompt.userChoice;
+    console.log(`PWA: User response to install prompt: ${outcome}`);
+    if (outcome === 'accepted') {
+      setDeferredPrompt(null);
+    }
+    setShowInstallerModal(false);
+  };
+
+  const fetchWithAuth = useCallback(async (url: string, options: RequestInit = {}) => {
+    const headers = {
+      ...options.headers,
+      'Authorization': `Bearer ${token}`
+    };
+    
+    try {
+      const response = await fetch(url, { ...options, headers });
+      if (response.status === 401) {
+        handleLogout();
+        throw new Error("Sessão expirada. Por favor, faça login novamente.");
+      }
+      return response;
+    } catch (err) {
+      if (err instanceof Error && err.message.includes("Sessão expirada")) {
+        throw err;
+      }
+      console.error(`Fetch error for ${url}:`, err);
+      throw err;
+    }
+  }, [token]);
 
   const [file, setFile] = useState<File | null>(null);
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
@@ -178,9 +270,7 @@ export default function App() {
         if (pdfUrl.startsWith('blob:') && file) {
           blob = file;
         } else {
-          const response = await fetch(pdfUrl, {
-            headers: (token && !pdfUrl.startsWith('blob:')) ? { 'Authorization': `Bearer ${token}` } : {}
-          });
+          const response = await fetchWithAuth(pdfUrl);
           if (!response.ok) {
             throw new Error(`Falha ao buscar PDF para análise: ${response.status} ${response.statusText}`);
           }
@@ -300,52 +390,6 @@ export default function App() {
   const [chatMessages, setChatMessages] = useState<{ role: string, content: string }[]>([]);
   const [userInput, setUserInput] = useState("");
   const [isChatLoading, setIsChatLoading] = useState(false);
-  
-  // PWA Install
-  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
-  const [showInstallButton, setShowInstallButton] = useState(false);
-
-  useEffect(() => {
-    const handleBeforeInstallPrompt = (e: any) => {
-      // Prevent Chrome 67 and earlier from automatically showing the prompt
-      e.preventDefault();
-      // Stash the event so it can be triggered later.
-      setDeferredPrompt(e);
-    };
-
-    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
-
-    window.addEventListener('appinstalled', () => {
-      setShowInstallButton(false);
-      setDeferredPrompt(null);
-      console.log('PWA was installed');
-    });
-
-    return () => {
-      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
-    };
-  }, []);
-
-  useEffect(() => {
-    // Only show install button if user is logged in AND we have a deferred prompt
-    if (user && deferredPrompt) {
-      setShowInstallButton(true);
-    } else {
-      setShowInstallButton(false);
-    }
-  }, [user, deferredPrompt]);
-
-  const handleInstallClick = async () => {
-    if (!deferredPrompt) return;
-    // Show the prompt
-    deferredPrompt.prompt();
-    // Wait for the user to respond to the prompt
-    const { outcome } = await deferredPrompt.userChoice;
-    console.log(`User response to the install prompt: ${outcome}`);
-    // We've used the prompt, and can't use it again, throw it away
-    setDeferredPrompt(null);
-    setShowInstallButton(false);
-  };
   
   // Detailed Analysis
   const [isDetailedAnalysisOpen, setIsDetailedAnalysisOpen] = useState(false);
@@ -563,18 +607,31 @@ export default function App() {
   useEffect(() => {
     const initAuth = async () => {
       if (token) {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 5000); // 5s timeout
+
         try {
           const res = await fetch('/api/auth/me', {
-            headers: { 'Authorization': `Bearer ${token}` }
+            headers: { 'Authorization': `Bearer ${token}` },
+            signal: controller.signal
           });
+          clearTimeout(timeoutId);
+          
           if (res.ok) {
             const userData = await res.json();
             setUser(userData);
-          } else {
+          } else if (res.status === 401) {
             handleLogout();
           }
-        } catch (err) {
-          console.error("Auth check failed", err);
+        } catch (err: any) {
+          if (err.name === 'AbortError') {
+            console.error("Auth check timed out");
+          } else {
+            console.error("Auth check failed", err);
+          }
+          // On network error, we might want to keep the user if we have cached data,
+          // but for security we usually want a fresh check.
+          // However, for "speed", we could implement a more complex offline strategy.
         }
       }
       setIsAuthLoading(false);
@@ -774,7 +831,6 @@ export default function App() {
     // Add search highlights if active
     if (hasSearchHighlights) {
       try {
-        pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
         const loadingTask = pdfjsLib.getDocument({
           url: pdfUrl.startsWith('/') ? `${window.location.origin}${pdfUrl}` : pdfUrl,
           httpHeaders: token ? { 'Authorization': `Bearer ${token}` } : undefined,
@@ -892,11 +948,10 @@ export default function App() {
         }))
       ];
 
-      const saveRes = await fetch(`/api/documents/${docId}/annotations`, {
+      const saveRes = await fetchWithAuth(`/api/documents/${docId}/annotations`, {
         method: 'PUT',
         headers: { 
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify({ annotations: allAnnotations })
       });
@@ -1079,9 +1134,7 @@ export default function App() {
   useEffect(() => {
     const fetchRecentDocs = async () => {
       try {
-        const res = await fetch('/api/documents', {
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
+        const res = await fetchWithAuth('/api/documents');
         if (res.ok) {
           const contentType = res.headers.get("content-type");
           if (contentType && contentType.includes("application/json")) {
@@ -1140,12 +1193,8 @@ export default function App() {
 
       // Load analysis and annotations
       const [analysisRes, annotationsRes] = await Promise.all([
-        fetch(`/api/documents/${doc.id}/analysis`, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        }),
-        fetch(`/api/documents/${doc.id}/annotations`, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        })
+        fetchWithAuth(`/api/documents/${doc.id}/analysis`),
+        fetchWithAuth(`/api/documents/${doc.id}/annotations`)
       ]);
       
       if (analysisRes.ok) {
@@ -1219,9 +1268,8 @@ export default function App() {
             console.error("Failed to delete local document:", localErr);
           }
 
-          const response = await fetch(`/api/documents/${id}`, { 
-            method: 'DELETE',
-            headers: { 'Authorization': `Bearer ${token}` }
+          const response = await fetchWithAuth(`/api/documents/${id}`, { 
+            method: 'DELETE'
           });
           
           if (response.ok || response.status === 404) {
@@ -1266,9 +1314,8 @@ export default function App() {
             console.error("Failed to clear local documents:", localErr);
           }
 
-          const response = await fetch('/api/documents', { 
-            method: 'DELETE',
-            headers: { 'Authorization': `Bearer ${token}` }
+          const response = await fetchWithAuth('/api/documents', { 
+            method: 'DELETE'
           });
           if (response.ok) {
             setRecentDocuments([]);
@@ -1346,9 +1393,8 @@ export default function App() {
       variant: 'warning',
       onConfirm: async () => {
         try {
-          const response = await fetch(`/api/documents/${docId}/annotations`, { 
-            method: 'DELETE',
-            headers: { 'Authorization': `Bearer ${token}` }
+          const response = await fetchWithAuth(`/api/documents/${docId}/annotations`, { 
+            method: 'DELETE'
           });
           if (response.ok) {
             setEdits([]);
@@ -1423,9 +1469,8 @@ export default function App() {
         const formData = new FormData();
         formData.append('pdf', uploadedFile);
 
-        const response = await fetch('/api/upload', {
+        const response = await fetchWithAuth('/api/upload', {
           method: 'POST',
-          headers: { 'Authorization': `Bearer ${token}` },
           body: formData,
           credentials: 'same-origin'
         });
@@ -1467,9 +1512,8 @@ export default function App() {
           formData.append('fileName', uploadedFile.name);
           formData.append('chunk', chunk);
 
-          const response = await fetch('/api/upload/chunk', {
+          const response = await fetchWithAuth('/api/upload/chunk', {
             method: 'POST',
-            headers: { 'Authorization': `Bearer ${token}` },
             body: formData,
             credentials: 'same-origin'
           });
@@ -1494,10 +1538,9 @@ export default function App() {
         }
 
         // Complete the upload
-        const completeResponse = await fetch('/api/upload/complete', {
+        const completeResponse = await fetchWithAuth('/api/upload/complete', {
           method: 'POST',
           headers: { 
-            'Authorization': `Bearer ${token}`,
             'Content-Type': 'application/json'
           },
           body: JSON.stringify({
@@ -1806,6 +1849,10 @@ export default function App() {
 
   const handleAiAnalyze = React.useCallback(async () => {
     if (!fullText) return;
+    if (!isOnline) {
+      showToast("Você está offline. A análise por IA requer conexão com a internet.", "error");
+      return;
+    }
     if (!currentApiKey) {
       setIsSettingsOpen(true);
       showToast("Por favor, adicione e selecione uma chave de API nas configurações antes de analisar.", "info");
@@ -1829,11 +1876,10 @@ export default function App() {
       
       // Save analysis to server
       if (docId) {
-        await fetch(`/api/documents/${docId}/analysis`, {
+        await fetchWithAuth(`/api/documents/${docId}/analysis`, {
           method: 'POST',
           headers: { 
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`
+            'Content-Type': 'application/json'
           },
           body: JSON.stringify({ analysis })
         });
@@ -1849,6 +1895,11 @@ export default function App() {
   const handleSendMessage = React.useCallback(async (overrideInput?: string) => {
     const input = overrideInput || userInput;
     if (!input.trim() || !fullText || isChatLoading) return;
+
+    if (!isOnline) {
+      showToast("Você está offline. O chat com IA requer conexão com a internet.", "error");
+      return;
+    }
 
     const newMessages = [...chatMessages, { role: 'user', content: input }];
     setChatMessages(newMessages);
@@ -1881,23 +1932,53 @@ export default function App() {
 
   if (isAuthLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-neutral-50 dark:bg-neutral-950">
-        <Loader2 size={48} className="animate-spin text-blue-600" />
+      <div className="min-h-screen flex flex-col items-center justify-center bg-neutral-50 dark:bg-neutral-950">
+        <motion.div
+          initial={{ opacity: 0, scale: 0.8 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ duration: 0.5, repeat: Infinity, repeatType: "reverse" }}
+          className="mb-8"
+        >
+          <div className="w-24 h-24 rounded-[2.5rem] bg-blue-600 flex items-center justify-center text-white shadow-2xl shadow-blue-600/20">
+            <Brain size={48} />
+          </div>
+        </motion.div>
+        <div className="flex flex-col items-center gap-2">
+          <Loader2 size={32} className="animate-spin text-blue-600" />
+          <p className="text-[10px] font-black uppercase tracking-[0.2em] text-neutral-400 animate-pulse">
+            Iniciando PDF Master AI...
+          </p>
+        </div>
       </div>
     );
   }
 
   if (!token || !user) {
-    return <Login onLogin={handleLogin} />;
+    return (
+      <Login 
+        onLogin={handleLogin} 
+        onInstall={handleInstallApp}
+        isInstallSupported={!!deferredPrompt}
+        isStandalone={isStandalone}
+      />
+    );
   }
 
   if (isAdminView && user.role === 'admin') {
-    return <AdminDashboard token={token} onBack={() => setIsAdminView(false)} showToast={showToast} />;
+    return <AdminDashboard token={token} onBack={() => setIsAdminView(false)} showToast={showToast} fetchWithAuth={fetchWithAuth} />;
   }
 
   return (
     <div className="flex flex-col h-screen w-full overflow-hidden font-sans bg-white text-neutral-900 dark:bg-neutral-950 dark:text-neutral-50 transition-colors duration-300">
       
+      {/* PWA Installer Modal */}
+      <PWAInstallerModal 
+        isOpen={showInstallerModal} 
+        onClose={() => setShowInstallerModal(false)} 
+        onInstall={handleInstallApp} 
+        isInstallSupported={!!deferredPrompt}
+      />
+
       {/* Detailed Analysis Modal */}
       <DetailedAnalysisModal 
         isOpen={isDetailedAnalysisOpen} 
@@ -2140,6 +2221,11 @@ export default function App() {
         selectedApiKeyId={selectedApiKeyId}
         setSelectedApiKeyId={setSelectedApiKeyId}
         onConfirmAction={(config) => setConfirmModal({ ...config, isOpen: true })}
+        onInstallApp={() => {
+          setIsSettingsOpen(false);
+          handleInstallApp();
+        }}
+        canInstallApp={!isStandalone}
       />
 
       {/* Offline Banner */}
@@ -2319,6 +2405,17 @@ export default function App() {
               </button>
             )}
 
+            {!isStandalone && (
+              <button 
+                onClick={handleInstallApp}
+                className="p-2 text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 rounded-lg transition-all flex items-center gap-2 border border-emerald-100 dark:border-emerald-900/30"
+                title="Instalar no PC (Desktop e Barra de Tarefas)"
+              >
+                <Download size={18} />
+                <span className="text-[10px] font-black uppercase tracking-widest">Instalar</span>
+              </button>
+            )}
+
             <button 
               onClick={() => setIsDarkMode(!isDarkMode)}
               className="p-2 text-neutral-500 hover:bg-neutral-100 rounded-lg transition-all"
@@ -2368,24 +2465,24 @@ export default function App() {
               onDragLeave={onDragLeave}
               onDrop={onDrop}
             >
-              {showInstallButton && (
+              {!!deferredPrompt && !isStandalone && (
                 <motion.div 
                   initial={{ opacity: 0, y: -20 }}
                   animate={{ opacity: 1, y: 0 }}
-                  className="mb-6 w-full max-w-xl bg-blue-600 text-white p-4 rounded-2xl flex items-center justify-between shadow-xl shadow-blue-500/20"
+                  className="mb-6 w-full max-w-xl bg-emerald-600 text-white p-4 rounded-2xl flex items-center justify-between shadow-xl shadow-emerald-500/20 border border-emerald-500/30"
                 >
                   <div className="flex items-center gap-3">
                     <div className="p-2 bg-white/20 rounded-xl">
                       <Download size={20} />
                     </div>
-                    <div>
-                      <h3 className="text-sm font-black uppercase tracking-widest">Instalar no Desktop</h3>
-                      <p className="text-[10px] opacity-80">Acesse o PDF Master AI direto da sua área de trabalho.</p>
+                    <div className="text-left">
+                      <h3 className="text-sm font-black uppercase tracking-widest">Instalar no Desktop e Barra de Tarefas</h3>
+                      <p className="text-[10px] opacity-80">Acesse o PDF Master AI direto da sua área de trabalho e barra de tarefas para produtividade máxima.</p>
                     </div>
                   </div>
                   <button 
-                    onClick={handleInstallClick}
-                    className="bg-white text-blue-600 px-4 py-2 rounded-xl text-xs font-black uppercase tracking-widest hover:bg-blue-50 transition-all active:scale-95"
+                    onClick={handleInstallApp}
+                    className="bg-white text-emerald-600 px-4 py-2 rounded-xl text-xs font-black uppercase tracking-widest hover:bg-emerald-50 transition-all active:scale-95 whitespace-nowrap ml-4"
                   >
                     Instalar Agora
                   </button>
@@ -2442,9 +2539,9 @@ export default function App() {
                       />
                     </label>
 
-                    {showInstallButton && (
+                    {!!deferredPrompt && !isStandalone && (
                       <button 
-                        onClick={handleInstallClick}
+                        onClick={handleInstallApp}
                         className="flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-blue-600 dark:text-blue-400 hover:text-blue-700 transition-all"
                       >
                         <Download size={14} />

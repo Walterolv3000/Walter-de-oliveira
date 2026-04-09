@@ -12,6 +12,8 @@ interface SettingsModalProps {
   selectedApiKeyId: string;
   setSelectedApiKeyId: (id: string) => void;
   onConfirmAction?: (config: { title: string, message: string, onConfirm: () => void, variant?: 'danger' | 'warning' | 'info' }) => void;
+  onInstallApp?: () => void;
+  canInstallApp?: boolean;
 }
 
 export const SettingsModal: React.FC<SettingsModalProps> = React.memo(({
@@ -21,7 +23,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = React.memo(({
   setApiKeys,
   selectedApiKeyId,
   setSelectedApiKeyId,
-  onConfirmAction
+  onConfirmAction,
+  onInstallApp,
+  canInstallApp
 }) => {
   const [newName, setNewName] = React.useState("");
   const [newKey, setNewKey] = React.useState("");
@@ -168,7 +172,27 @@ export const SettingsModal: React.FC<SettingsModalProps> = React.memo(({
               </div>
 
               <div className="bg-blue-50 dark:bg-blue-900/10 p-4 rounded-2xl border border-blue-100 dark:border-blue-900/30 space-y-2">
-                <h3 className="text-[10px] font-black uppercase text-blue-600 dark:text-blue-400 tracking-widest">Versão Portátil (Desktop)</h3>
+                <h3 className="text-[10px] font-black uppercase text-blue-600 dark:text-blue-400 tracking-widest">Aplicativo Desktop (PWA)</h3>
+                <p className="text-[10px] text-blue-800/70 dark:text-blue-300/70 leading-relaxed">
+                  Instale o PDF Master AI para acesso rápido na área de trabalho e barra de tarefas.
+                </p>
+                {canInstallApp ? (
+                  <button 
+                    onClick={onInstallApp}
+                    className="w-full bg-blue-600 text-white py-2 rounded-lg text-[10px] font-black uppercase tracking-widest hover:bg-blue-700 transition-all flex items-center justify-center gap-2 shadow-md shadow-blue-600/20"
+                  >
+                    Instalar Aplicativo
+                  </button>
+                ) : (
+                  <div className="bg-white/50 dark:bg-black/20 p-2 rounded-lg border border-blue-200/50 dark:border-blue-800/30">
+                    <p className="text-[9px] font-medium text-blue-900 dark:text-blue-100 text-center italic">
+                      O aplicativo já está instalado ou não é suportado neste navegador.
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              <div className="bg-neutral-50 dark:bg-neutral-800/20 p-4 rounded-2xl border border-neutral-200 dark:border-neutral-800 space-y-2">
                 <p className="text-[10px] text-blue-800/70 dark:text-blue-300/70 leading-relaxed">
                   Você pode gerar um executável (.exe) para usar este app no Windows sem instalar nada.
                 </p>

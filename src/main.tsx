@@ -12,6 +12,14 @@ if ('serviceWorker' in navigator) {
   });
 }
 
+// Global variable to capture beforeinstallprompt event
+(window as any).deferredPrompt = null;
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  (window as any).deferredPrompt = e;
+  console.log('PWA: beforeinstallprompt event captured globally');
+});
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <App />

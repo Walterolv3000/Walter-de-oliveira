@@ -20,9 +20,10 @@ interface AdminDashboardProps {
   token: string;
   onBack: () => void;
   showToast: (message: string, type?: 'success' | 'error' | 'info') => void;
+  fetchWithAuth: (url: string, options?: RequestInit) => Promise<Response>;
 }
 
-export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, onBack, showToast }) => {
+export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, onBack, showToast, fetchWithAuth }) => {
   const [users, setUsers] = useState<UserData[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
@@ -63,9 +64,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, onBack, s
   const fetchUsers = async () => {
     setIsLoading(true);
     try {
-      const response = await fetch('/api/admin/users', {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
+      const response = await fetchWithAuth('/api/admin/users');
       if (response.ok) {
         const contentType = response.headers.get("content-type");
         if (contentType && contentType.includes("application/json")) {
@@ -82,9 +81,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, onBack, s
 
   const fetchPrompts = async () => {
     try {
-      const response = await fetch('/api/prompts', {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
+      const response = await fetchWithAuth('/api/prompts');
       if (response.ok) {
         const contentType = response.headers.get("content-type");
         if (contentType && contentType.includes("application/json")) {
@@ -129,11 +126,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, onBack, s
     const method = editingUser ? 'PUT' : 'POST';
 
     try {
-      const response = await fetch(url, {
+      const response = await fetchWithAuth(url, {
         method,
         headers: { 
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify(formData)
       });
@@ -165,11 +161,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, onBack, s
     setIsLoading(true);
 
     try {
-      const response = await fetch(`/api/admin/users/${userToResetPassword.id}`, {
+      const response = await fetchWithAuth(`/api/admin/users/${userToResetPassword.id}`, {
         method: 'PUT',
         headers: { 
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify({ 
           name: userToResetPassword.name, 
@@ -236,9 +231,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, onBack, s
     
     setIsDeleting(true);
     try {
-      const response = await fetch(`/api/admin/users/${userToDelete.id}`, {
-        method: 'DELETE',
-        headers: { 'Authorization': `Bearer ${token}` }
+      const response = await fetchWithAuth(`/api/admin/users/${userToDelete.id}`, {
+        method: 'DELETE'
       });
 
       if (response.ok) {
@@ -292,11 +286,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, onBack, s
     const method = editingPrompt ? 'PUT' : 'POST';
 
     try {
-      const response = await fetch(url, {
+      const response = await fetchWithAuth(url, {
         method,
         headers: { 
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify(promptFormData)
       });
@@ -330,9 +323,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, onBack, s
     setIsLoading(true);
     
     try {
-      const response = await fetch(`/api/prompts/${promptToDelete.id}`, {
-        method: 'DELETE',
-        headers: { 'Authorization': `Bearer ${token}` }
+      const response = await fetchWithAuth(`/api/prompts/${promptToDelete.id}`, {
+        method: 'DELETE'
       });
 
       if (response.ok) {

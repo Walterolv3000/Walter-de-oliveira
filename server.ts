@@ -583,7 +583,7 @@ app.post("/api/auth/login", async (req, res) => {
     }
 
     console.log(`Login successful for user: ${email}`);
-    const token = jwt.sign({ id: user.id, email: user.email, role: user.role }, JWT_SECRET, { expiresIn: '24h' });
+    const token = jwt.sign({ id: user.id, email: user.email, role: user.role }, JWT_SECRET, { expiresIn: '7d' });
     res.json({ token, user: { id: user.id, name: user.name, email: user.email, role: user.role } });
   } catch (err) {
     console.error(`Login error for ${email}:`, err);

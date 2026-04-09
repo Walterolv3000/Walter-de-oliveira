@@ -1,12 +1,9 @@
-const CACHE_NAME = 'pdf-master-ai-v4';
+const CACHE_NAME = 'pdf-master-ai-v9';
 const ASSETS_TO_CACHE = [
-  '/',
-  '/index.html',
-  '/manifest.json',
-  '/favicon.ico',
-  'https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap',
-  'https://cdn-icons-png.flaticon.com/512/337/337946.png',
-  'https://unpkg.com/pdfjs-dist@4.0.379/build/pdf.worker.min.mjs'
+  './',
+  'index.html',
+  'manifest.json',
+  'https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;700&display=swap'
 ];
 
 self.addEventListener('install', (event) => {
@@ -34,36 +31,80 @@ self.addEventListener('activate', (event) => {
 });
 
 self.addEventListener('fetch', (event) => {
-  // Skip cross-origin requests (except fonts/icons) and API calls
-  const isApiCall = event.request.url.includes('/api/');
-  const isExternalAsset = event.request.url.startsWith('https://fonts.') || 
-                          event.request.url.startsWith('https://cdn-icons-png.') ||
-                          event.request.url.includes('pdf.worker.min.mjs');
+  const { request } = event;
+  const url = new URL(request.url);
 
-  if (isApiCall) return;
-
-  if (!event.request.url.startsWith(self.location.origin) && !isExternalAsset) {
+  // Skip API calls - always network
+  if (url.pathname.includes('/api/')) {
     return;
   }
 
-  // Stale-while-revalidate strategy for assets
-  event.respondWith(
-    caches.match(event.request).then((cachedResponse) => {
-      const fetchPromise = fetch(event.request).then((networkResponse) => {
-        // Only cache valid responses from our origin or allowed external assets
-        if (networkResponse && networkResponse.status === 200 && 
-           (event.request.url.startsWith(self.location.origin) || isExternalAsset)) {
-          const responseToCache = networkResponse.clone();
-          caches.open(CACHE_NAME).then((cache) => {
-            cache.put(event.request, responseToCache);
-          });
-        }
-        return networkResponse;
-      }).catch(() => {
-        // If network fails, we already returned cachedResponse if it exists
-      });
+  // Navigation requests (loading the app) - Cache First, then Network
+  if (request.mode === 'navigate') {
+    event.respondWith(
+      caches.match(request).then((cachedResponse) => {
+        if (cachedResponse) return cachedResponse;
+        
+        // Fallback to index.html if specific path not found in cache
+        return caches.match('index.html').then((indexResponse) => {
+          return indexResponse || fetch(request);
+        });
+      }).catch(() => fetch(request))
+    );
+    return;
+  }
 
-      return cachedResponse || fetchPromise;
-    })
+  // External assets (fonts, icons, worker)
+  const isExternalAsset = url.origin !== self.location.origin && (
+    url.hostname.includes('fonts.') || 
+    url.hostname.includes('gstatic.') ||
+    url.hostname.includes('cdn-icons-png.') ||
+    url.pathname.includes('pdf.worker')
   );
+
+  // Internal assets or allowed external assets
+  const isInternalAsset = url.origin === self.location.origin;
+  const isStaticAsset = url.pathname.includes('/assets/') || 
+                        url.pathname.endsWith('.js') || 
+                        url.pathname.endsWith('.css') ||
+                        url.pathname.endsWith('.png') ||
+                        url.pathname.endsWith('.jpg') ||
+                        url.pathname.endsWith('.svg') ||
+                        url.pathname.endsWith('.json');
+
+  if (isInternalAsset || isExternalAsset) {
+    // Cache First strategy for assets to ensure offline works perfectly
+    event.respondWith(
+      caches.match(request).then((cachedResponse) => {
+        if (cachedResponse && isStaticAsset) {
+          // For static assets (versioned), return from cache immediately
+          return cachedResponse;
+        }
+
+        if (cachedResponse) {
+          // For other assets, return cached but update in background
+          fetch(request).then((networkResponse) => {
+            if (networkResponse && networkResponse.status === 200) {
+              const responseToCache = networkResponse.clone();
+              caches.open(CACHE_NAME).then((cache) => {
+                cache.put(request, responseToCache);
+              });
+            }
+          }).catch(() => {});
+          return cachedResponse;
+        }
+
+        // Not in cache, fetch from network
+        return fetch(request).then((networkResponse) => {
+          if (networkResponse && networkResponse.status === 200) {
+            const responseToCache = networkResponse.clone();
+            caches.open(CACHE_NAME).then((cache) => {
+              cache.put(request, responseToCache);
+            });
+          }
+          return networkResponse;
+        });
+      })
+    );
+  }
 });

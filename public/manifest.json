@@ -2,9 +2,9 @@
   "name": "PDF Master AI - Análise Inteligente",
   "short_name": "PDF Master",
   "description": "Análise inteligente de documentos PDF com IA e indexação local rápida.",
-  "start_url": "/",
+  "start_url": ".",
+  "scope": ".",
   "display": "standalone",
-  "display_override": ["window-controls-overlay", "minimal-ui"],
   "background_color": "#ffffff",
   "theme_color": "#2563eb",
   "orientation": "any",
@@ -15,16 +15,11 @@
       "name": "Nova Análise",
       "short_name": "Novo",
       "description": "Iniciar uma nova análise de PDF",
-      "url": "/",
+      "url": ".",
       "icons": [{ "src": "https://cdn-icons-png.flaticon.com/512/337/337946.png", "sizes": "192x192" }]
     }
   ],
   "icons": [
-    {
-      "src": "/favicon.ico",
-      "sizes": "64x64 32x32 24x24 16x16",
-      "type": "image/x-icon"
-    },
     {
       "src": "https://cdn-icons-png.flaticon.com/512/337/337946.png",
       "sizes": "192x192",
