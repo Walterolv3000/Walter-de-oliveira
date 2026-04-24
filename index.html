@@ -18,19 +18,21 @@
     <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/337/337946.png">
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; font-family: sans-serif; color: #2563eb; background-color: #f9fafb;">
+        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="width: 64px; height: 64px; animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;">
+          <path d="M12 2L2 7L12 12L22 7L12 2Z" fill="currentColor" opacity="0.3"></path>
+          <path d="M2 17L12 22L22 17" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+          <path d="M2 12L12 17L22 12" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+        </svg>
+        <style>
+          @keyframes pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: .7; transform: scale(0.95); } }
+        </style>
+        <p style="margin-top: 24px; font-weight: 600; font-size: 16px; letter-spacing: -0.025em;">PDF Master AI</p>
+        <p style="margin-top: 8px; font-weight: 400; font-size: 13px; color: #6b7280;">Carregando sua plataforma inteligente...</p>
+      </div>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
-    <script>
-      if ('serviceWorker' in navigator) {
-        window.addEventListener('load', () => {
-          navigator.serviceWorker.register('sw.js').then(registration => {
-            console.log('SW registered: ', registration);
-          }).catch(registrationError => {
-            console.log('SW registration failed: ', registrationError);
-          });
-        });
-      }
-    </script>
   </body>
 </html>
 

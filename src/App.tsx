@@ -375,6 +375,15 @@ export default function App() {
   
   // Search
   const [searchQuery, setSearchQuery] = useState("");
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState("");
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearchQuery(searchQuery);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
+
   const [fixedKeywords, setFixedKeywords] = useState<string[]>([]);
   const [searchFilters, setSearchFilters] = useState({
     caseSensitive: false,
@@ -1697,8 +1706,8 @@ export default function App() {
   const handleSearch = useCallback((customQueries?: string[]) => {
     // If no custom queries, use the search input combined with fixed keywords
     const inputQueries = searchFilters.multipleKeywords 
-      ? searchQuery.split(',').map(q => q.trim()).filter(q => q)
-      : [searchQuery.trim()].filter(q => q);
+      ? debouncedSearchQuery.split(',').map(q => q.trim()).filter(q => q)
+      : [debouncedSearchQuery.trim()].filter(q => q);
     
     const queries = customQueries || inputQueries;
 
@@ -1796,7 +1805,7 @@ export default function App() {
       setActiveMatch(null);
     }
     setIsSearchNavOpen((matches || []).length > 0);
-  }, [searchQuery, searchFilters, fixedKeywords, pages]);
+  }, [debouncedSearchQuery, searchFilters, fixedKeywords, pages]);
 
   const addFixedKeyword = () => {
     if (searchQuery && !fixedKeywords.includes(searchQuery)) {

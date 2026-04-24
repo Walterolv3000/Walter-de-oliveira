@@ -1,4 +1,5 @@
 import express from "express";
+import compression from "compression";
 import multer from "multer";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -20,6 +21,7 @@ const resolvedDirname = typeof import.meta !== 'undefined' && import.meta.url
   : (typeof __dirname !== 'undefined' ? __dirname : process.cwd());
 
 const app = express();
+app.use(compression());
 app.set('trust proxy', 1); // Trust first proxy (Cloud Run load balancer)
 const PORT = 3000;
 const JWT_SECRET = process.env.JWT_SECRET || "pdf-analyzer-secret-key-2026"; // Static fallback to prevent logout on restarts
@@ -1433,9 +1435,16 @@ async function startServer() {
 
       if (fs.existsSync(distPath)) {
         console.log(`Frontend build found at ${distPath}`);
-        app.use(express.static(distPath));
+        // Serve static assets with high cache lifetime for fingerprinted files
+        app.use(express.static(distPath, {
+          maxAge: '7d',
+          index: false 
+        }));
+        
         app.get("*", (req, res) => {
-          res.sendFile(path.join(distPath, "index.html"));
+          res.sendFile(path.join(distPath, "index.html"), {
+            maxAge: '0' // Do not cache index.html to ensure users get updates
+          });
         });
       } else {
         console.error(`CRITICAL: Frontend build NOT found at ${distPath}`);

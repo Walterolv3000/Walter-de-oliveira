@@ -4,9 +4,6 @@ import * as pdfjsLib from 'pdfjs-dist';
 import { motion } from 'motion/react';
 import { cn } from '../lib/utils';
 
-// Use the version-matched worker from a reliable CDN for better compatibility in development and iframe environments
-pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
-
 // Fallback for local worker if CDN fails (optional, but good for offline)
 // import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.mjs?url';
 // if (typeof window !== 'undefined' && !pdfjsLib.GlobalWorkerOptions.workerSrc) {
