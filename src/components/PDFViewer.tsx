@@ -1,12 +1,17 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Loader2, X } from 'lucide-react';
 import * as pdfjsLib from 'pdfjs-dist';
-import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.mjs?url';
 import { motion } from 'motion/react';
 import { cn } from '../lib/utils';
 
-// Set worker path using the local worker from the package
-pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
+// Use the version-matched worker from a reliable CDN for better compatibility in development and iframe environments
+pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
+
+// Fallback for local worker if CDN fails (optional, but good for offline)
+// import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.mjs?url';
+// if (typeof window !== 'undefined' && !pdfjsLib.GlobalWorkerOptions.workerSrc) {
+//   pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
+// }
 
 interface PDFViewerProps {
   url: string;
@@ -16,6 +21,7 @@ interface PDFViewerProps {
   zoom?: number;
   currentPage?: number;
   onThumbnailsGenerated?: (thumbnails: string[]) => void;
+  onNumPagesLoaded?: (numPages: number) => void;
   highlightQueries?: string[];
   currentMatch?: { page: number, query: string, occurrenceIndexOnPage?: number } | null;
   showAll?: boolean;
@@ -42,6 +48,7 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({
   zoom = 1.0,
   currentPage = 1,
   onThumbnailsGenerated,
+  onNumPagesLoaded,
   highlightQueries = [],
   currentMatch = null,
   showAll = false,
@@ -101,68 +108,50 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({
         
         if (!isMounted) return;
         setPdf(pdfDoc);
+        onNumPagesLoaded?.(pdfDoc.numPages);
         console.log("PDF loaded successfully, pages:", pdfDoc.numPages);
 
         // Extract text and thumbnails in background with idle priority
         const extractData = async () => {
-          let fullText = "";
-          const thumbs: string[] = new Array(pdfDoc.numPages).fill("");
           const pageTexts: string[] = new Array(pdfDoc.numPages).fill("");
           
           // Process pages in batches for better performance
-          const batchSize = 3; // Smaller batch for smoother UI
+          const batchSize = 10; // Larger batch size since we only extract text
           
           const processBatch = async (startPage: number) => {
             if (!isMounted) return;
             
+            const endPage = Math.min(startPage + batchSize - 1, pdfDoc.numPages);
             const batch = [];
-            for (let j = startPage; j < startPage + batchSize && j <= pdfDoc.numPages; j++) {
+            for (let j = startPage; j <= endPage; j++) {
               batch.push(j);
             }
             
             await Promise.all(batch.map(async (pageNum) => {
               try {
                 const page = await pdfDoc.getPage(pageNum);
+                
+                // 1. Extract Text (Always do this)
                 const textContent = await page.getTextContent();
                 const pageText = (textContent.items || []).map((item: any) => item.str).join(" ");
                 pageTexts[pageNum - 1] = pageText;
 
-                // Thumbnail generation - only for first 100 pages to save memory on desktop
-                if (pageNum <= 100) {
-                  const viewport = page.getViewport({ scale: 0.15 }); // Slightly smaller for performance
-                  const canvas = document.createElement('canvas');
-                  const context = canvas.getContext('2d', { alpha: false }); // Optimization
-                  if (context) {
-                    canvas.height = viewport.height;
-                    canvas.width = viewport.width;
-                    await page.render({ 
-                      canvasContext: context, 
-                      viewport, 
-                      canvas,
-                      intent: 'display'
-                    }).promise;
-                    thumbs[pageNum - 1] = canvas.toDataURL('image/jpeg', 0.5); // Lower quality for speed
-                  }
-                }
               } catch (pageErr) {
-                console.warn(`Error extracting page ${pageNum}:`, pageErr);
-                pageTexts[pageNum - 1] = "[Erro ao extrair texto]";
+                console.warn(`Error processing page ${pageNum}:`, pageErr);
+                pageTexts[pageNum - 1] = "[Erro]";
               }
             }));
 
+            // Final updates after each batch to show partial progress if needed
+            // But we'll wait for text completion for AI
             if (startPage + batchSize <= pdfDoc.numPages) {
-              // Schedule next batch on next idle period
-              if ('requestIdleCallback' in window) {
-                (window as any).requestIdleCallback(() => processBatch(startPage + batchSize));
-              } else {
-                setTimeout(() => processBatch(startPage + batchSize), 50);
-              }
+              const delay = startPage <= 10 ? 20 : 100; // Faster for initial pages
+              setTimeout(() => processBatch(startPage + batchSize), delay);
             } else {
               // Finished all pages
               if (isMounted) {
-                fullText = pageTexts.map((text, i) => `\n--- Page ${i + 1} ---\n${text}`).join("");
+                const fullText = pageTexts.map((text, i) => `\n--- Page ${i + 1} ---\n${text}`).join("");
                 onTextExtract?.(fullText);
-                onThumbnailsGenerated?.(thumbs);
               }
             }
           };
@@ -244,24 +233,25 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({
         
         if (!isCurrentRender) return;
 
-        // Render text layer for selection
-        if (textLayerRef.current) {
-          textLayerRef.current.innerHTML = '';
-          const textContent = await page.getTextContent();
-          const textLayer = new (pdfjsLib as any).TextLayer({
-            textContentSource: textContent,
-            container: textLayerRef.current,
-            viewport: viewport,
-          });
-          await textLayer.render();
-        }
-
         onPageChange?.(currentPage);
 
-        // Calculate highlights
-        if ((highlightQueries || []).length > 0) {
+        if (textLayerRef.current || (highlightQueries || []).length > 0) {
           const textContent = await page.getTextContent();
-          const newHighlights: any[] = [];
+          
+          // Render text layer for selection
+          if (textLayerRef.current) {
+            textLayerRef.current.innerHTML = '';
+            const textLayer = new (pdfjsLib as any).TextLayer({
+              textContentSource: textContent,
+              container: textLayerRef.current,
+              viewport: viewport,
+            });
+            await textLayer.render();
+          }
+
+          // Calculate highlights
+          if ((highlightQueries || []).length > 0) {
+            const newHighlights: any[] = [];
           const lowerQueries = (highlightQueries || []).map(q => q.toLowerCase());
           const queryCounters: Record<string, number> = {};
           lowerQueries.forEach(q => queryCounters[q] = 0);
@@ -330,6 +320,7 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({
           }
         }
 
+        }
       } catch (err: any) {
         if (err.name !== 'RenderingCancelledException' && isCurrentRender) {
           console.error("Render Error:", err);

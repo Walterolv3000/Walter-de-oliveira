@@ -38,6 +38,7 @@ const isSupabaseConfigured = Boolean(supabaseUrl && (process.env.SUPABASE_SERVIC
 
 // Database Setup (Local JSON - Fallback if Supabase is not configured)
 const isPkg = (process as any).pkg !== undefined;
+const isCloudRun = process.env.K_SERVICE !== undefined || process.env.CLOUD_RUN_JOB !== undefined;
 const baseDir = isPkg ? path.dirname(process.execPath) : process.cwd();
 const DB_FILE = path.join(baseDir, "db.json");
 const UPLOAD_DIR = path.join(baseDir, "uploads");
@@ -245,7 +246,9 @@ async function syncUsers() {
 syncUsers().catch(err => console.error("Failed to sync users on startup:", err));
 
 app.use(helmet({
-  contentSecurityPolicy: false, // Disable CSP for development iframe compatibility
+  contentSecurityPolicy: false,
+  crossOriginEmbedderPolicy: false,
+  crossOriginResourcePolicy: { policy: "cross-origin" },
 }));
 app.use(cors());
 
@@ -293,24 +296,22 @@ const isAdmin = (req: AuthRequest, res: express.Response, next: express.NextFunc
   }
 };
 
-// Request logger for debugging
+// Request logger for debugging - MOVE THIS EARLIER
 app.use((req, res, next) => {
+  if (req.url.startsWith('/api/')) {
+    console.log(`[API REQUEST] ${new Date().toISOString()} - ${req.method} ${req.url}`);
+  }
   const start = Date.now();
   res.on('finish', () => {
     const duration = Date.now() - start;
-    const log = `${new Date().toISOString()} - ${req.method} ${req.url} - ${res.statusCode} - ${duration}ms`;
-    console.log(log); // Log to console for build logs
-    try {
-      fs.appendFileSync("server.log", log + '\n');
-    } catch (e) {
-      // Ignore log write errors
+    if (req.url.startsWith('/api/')) {
+      console.log(`[API RESPONSE] ${req.method} ${req.url} - ${res.statusCode} - ${duration}ms`);
     }
   });
   next();
 });
 
-// Ensure uploads and chunks directory exists
-const isCloudRun = process.env.K_SERVICE !== undefined;
+// Ensure uploads and chunks directory exists (Restored)
 const uploadsDir = (process.env.VERCEL || isCloudRun) ? "/tmp/uploads" : UPLOAD_DIR;
 const chunksDir = (process.env.VERCEL || isCloudRun) ? "/tmp/chunks" : CHUNK_DIR;
 
@@ -357,6 +358,10 @@ const upload = multer({
 });
 
 // API Routes
+app.get("/api/ping", (req, res) => {
+  res.json({ message: "pong", time: new Date().toISOString() });
+});
+
 app.get("/api/health", (req, res) => {
   res.json({ status: "ok", time: new Date().toISOString() });
 });
@@ -1399,7 +1404,8 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
   console.error("Unhandled error:", err);
   
   // If it's an API route, always return JSON
-  if (req.url.startsWith('/api/')) {
+  const isApi = req.url.startsWith('/api/') || req.originalUrl.startsWith('/api/') || req.path.startsWith('/api/');
+  if (isApi) {
     return res.status(err.status || 500).json({ 
       error: "Internal server error", 
       message: err.message || "Ocorreu um erro interno no servidor"
@@ -1420,24 +1426,25 @@ async function startServer() {
       });
       app.use(vite.middlewares);
     } else {
-      // When using pkg, the dist folder is inside the executable
-      const isPkg = (process as any).pkg !== undefined;
-      const distPath = isPkg 
-        ? path.join(path.dirname(process.execPath), "dist") // Look outside first
-        : path.join(process.cwd(), "dist");
+      // In production (Cloud Run or Vercel), dist is at the workspace root
+      const distPath = path.join(process.cwd(), "dist");
       
-      // Fallback to internal snapshot if not found outside
-      const internalDistPath = path.join(resolvedDirname, "dist");
-      const finalDistPath = fs.existsSync(distPath) ? distPath : internalDistPath;
+      console.log(`Checking for frontend build at: ${distPath}`);
 
-      if (fs.existsSync(finalDistPath)) {
-        app.use(express.static(finalDistPath));
+      if (fs.existsSync(distPath)) {
+        console.log(`Frontend build found at ${distPath}`);
+        app.use(express.static(distPath));
         app.get("*", (req, res) => {
-          res.sendFile(path.join(finalDistPath, "index.html"));
+          res.sendFile(path.join(distPath, "index.html"));
         });
       } else {
+        console.error(`CRITICAL: Frontend build NOT found at ${distPath}`);
+        // Check if index.html exists in root as fallback (development artifact)
+        if (fs.existsSync(path.join(process.cwd(), "index.html"))) {
+          console.log("Found index.html in root, possibly development mode without vite middleware");
+        }
         app.get("*", (req, res) => {
-          res.status(404).send("Frontend build not found. Please run 'npm run build' first.");
+          res.status(404).send(`Frontend build not found at ${distPath}. Please ensure 'npm run build' was successful.`);
         });
       }
     }

@@ -357,10 +357,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, onBack, s
     setIsPromptDeleteModalOpen(true);
   };
 
-  const filteredUsers = users.filter(u => 
+  const filteredUsers = React.useMemo(() => users.filter(u => 
     u.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
     u.email.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  ), [users, searchQuery]);
 
   return (
     <div className="min-h-screen bg-neutral-50 dark:bg-neutral-950 flex flex-col">

@@ -4,7 +4,7 @@ import { motion } from 'motion/react';
 import { cn } from '../lib/utils';
 
 interface GroupedMatch {
-  matches: { page: number, query: string, id?: string, occurrenceIndexOnPage?: number }[];
+  matches: { page: number, query: string, id?: string, occurrenceIndexOnPage?: number, snippet?: string }[];
   currentIndex: number;
 }
 
@@ -299,19 +299,28 @@ export const SearchTab: React.FC<SearchTabProps> = React.memo(({
             </div>
             
             {!isCollapsed && (
-              <div className="max-h-40 overflow-y-auto p-2 space-y-1 custom-scrollbar">
+              <div className="max-h-60 overflow-y-auto p-2 space-y-2 custom-scrollbar">
                 {(groupData.matches || []).length > 0 ? (
-                  [...new Set((groupData.matches || []).map(m => m.page))].map((page, idx) => (
+                  groupData.matches.map((match, idx) => (
                     <button 
                       key={idx}
-                      onClick={() => setCurrentPage(page)}
-                      className="w-full text-left px-3 py-2 rounded-lg hover:bg-white dark:hover:bg-neutral-800 text-[10px] font-bold text-neutral-500 flex justify-between items-center group transition-all border border-transparent hover:border-neutral-200 dark:hover:border-neutral-700"
+                      onClick={() => {
+                        setCurrentPage(match.page);
+                        // Optional: trigger navigation to this specific match
+                        navigateKeywordMatch(query, 'next'); // This is a bit hacky but if we want to go exactly to this occurrence
+                      }}
+                      className="w-full text-left p-3 rounded-xl hover:bg-white dark:hover:bg-neutral-800 transition-all border border-transparent hover:border-neutral-200 dark:hover:border-neutral-700 group"
                     >
-                      <div className="flex items-center gap-2">
-                        <FileText size={12} className="text-neutral-400" />
-                        <span>Página {page}</span>
+                      <div className="flex justify-between items-center mb-1">
+                        <div className="flex items-center gap-1.5">
+                          <FileText size={10} className="text-neutral-400" />
+                          <span className="text-[9px] font-black uppercase text-neutral-400">Página {match.page}</span>
+                        </div>
+                        <span className="text-[8px] font-black text-blue-500 opacity-0 group-hover:opacity-100 transition-opacity">Ver no Doc</span>
                       </div>
-                      <ChevronRight size={12} className="opacity-0 group-hover:opacity-100 transition-opacity text-blue-600" />
+                      <p className="text-[10px] text-neutral-600 dark:text-neutral-300 leading-relaxed line-clamp-2 italic">
+                        {match.snippet}
+                      </p>
                     </button>
                   ))
                 ) : (

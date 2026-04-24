@@ -1,33 +1,35 @@
-import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef, Suspense, lazy } from 'react';
 import { 
   FileText, Search, Brain, ChevronLeft, ChevronRight, 
   ZoomIn, ZoomOut, Download, Printer,
   Send, Loader2, Menu, X, Sun, Moon, Highlighter, EyeOff, Eye,
   ChevronUp, ChevronDown, Settings, Plus, Trash2, Check, Eraser,
   ArrowUpDown, MoreVertical, Filter, PanelRightOpen, PanelRightClose, PanelRight,
-  LayoutList, Copy, Pencil, RotateCcw
+  LayoutList, Copy, Pencil, RotateCcw, LogOut, ShieldCheck
 } from 'lucide-react';
 import * as pdfjsLib from 'pdfjs-dist';
+// Use local worker URL to avoid CORS and performance issues in iframe
 import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.mjs?url';
 import { safePrintPDF, safePrintHTML } from './lib/printUtils';
 import { PDFViewer } from './components/PDFViewer';
-import { DetailedAnalysisModal } from './components/DetailedAnalysisModal';
-import { FindingDetailsModal } from './components/FindingDetailsModal';
-import { SettingsModal } from './components/SettingsModal';
-import { PromptEditorModal } from './components/PromptEditorModal';
-import { SearchTab } from './components/SearchTab';
-import { AITab } from './components/AITab';
 import { analyzeDocument, chatWithDocument, AIProvider } from './services/aiService';
-import { ConfirmationModal } from './components/ConfirmationModal';
 import { Toast, ToastType } from './components/Toast';
 import { editPdf } from './services/pdfService';
 import { cn } from './lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
-import { PWAInstallerModal } from './components/PWAInstallerModal';
-import { Login } from './components/Login';
-import { AdminDashboard } from './components/AdminDashboard';
-import { LogOut, ShieldCheck } from 'lucide-react';
 import { saveLocalDocument, getLocalDocument, deleteLocalDocument, updateLocalDocument, getAllLocalDocuments, openDB, STORE_NAME } from './lib/indexedDB';
+
+// Lazy load modals and non-critical components for faster initial load
+const DetailedAnalysisModal = lazy(() => import('./components/DetailedAnalysisModal').then(m => ({ default: m.DetailedAnalysisModal })));
+const FindingDetailsModal = lazy(() => import('./components/FindingDetailsModal').then(m => ({ default: m.FindingDetailsModal })));
+const SettingsModal = lazy(() => import('./components/SettingsModal').then(m => ({ default: m.SettingsModal })));
+const PromptEditorModal = lazy(() => import('./components/PromptEditorModal').then(m => ({ default: m.PromptEditorModal })));
+const SearchTab = lazy(() => import('./components/SearchTab').then(m => ({ default: m.SearchTab })));
+const AITab = lazy(() => import('./components/AITab').then(m => ({ default: m.AITab })));
+const ConfirmationModal = lazy(() => import('./components/ConfirmationModal').then(m => ({ default: m.ConfirmationModal })));
+const PWAInstallerModal = lazy(() => import('./components/PWAInstallerModal').then(m => ({ default: m.PWAInstallerModal })));
+const Login = lazy(() => import('./components/Login').then(m => ({ default: m.Login })));
+const AdminDashboard = lazy(() => import('./components/AdminDashboard').then(m => ({ default: m.AdminDashboard })));
 
 const DEFAULT_PROMPTS = [
   { id: 'padrão', name: 'Padrão', prompt: 'Você é um especialista em análise de documentos. Extraia informações relevantes, identifique empresas, datas e eventos importantes. Seja preciso e detalhado.', isDefault: true },
@@ -125,12 +127,19 @@ interface PromptItem {
 }
 
 interface GroupedMatch {
-  matches: { page: number, query: string, id?: string, occurrenceIndexOnPage?: number }[];
+  matches: { page: number, query: string, id?: string, occurrenceIndexOnPage?: number, snippet?: string }[];
   currentIndex: number;
 }
 
 export default function App() {
-  const [user, setUser] = useState<any>(null);
+  const [user, setUser] = useState<any>(() => {
+    try {
+      const saved = localStorage.getItem('auth_user');
+      return saved ? JSON.parse(saved) : null;
+    } catch (e) {
+      return null;
+    }
+  });
   const [token, setToken] = useState<string | null>(localStorage.getItem('auth_token'));
   const [isAdminView, setIsAdminView] = useState(false);
   const [isAuthLoading, setIsAuthLoading] = useState(true);
@@ -140,14 +149,17 @@ export default function App() {
   const [isStandalone, setIsStandalone] = useState(false);
 
   useEffect(() => {
-    // Set PDF.js worker once
-    pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
+    // Set PDF.js worker precisely once
+    if (!pdfjsLib.GlobalWorkerOptions.workerSrc) {
+      pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
+    }
     
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.ready.then(registration => {
-        console.log('PWA: Service Worker is ready:', registration.active?.state);
-      }).catch(err => {
-        console.error('PWA: Service Worker ready check failed:', err);
+      navigator.serviceWorker.getRegistrations().then(registrations => {
+        for (const registration of registrations) {
+          registration.unregister();
+          console.log("Service Worker unregistered successfully.");
+        }
       });
     }
     
@@ -157,8 +169,19 @@ export default function App() {
       console.log('PWA: Standalone check:', isStandaloneMode);
     };
     checkStandalone();
+
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
     window.addEventListener('resize', checkStandalone);
-    return () => window.removeEventListener('resize', checkStandalone);
+    
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+      window.removeEventListener('resize', checkStandalone);
+    };
   }, []);
 
   useEffect(() => {
@@ -402,7 +425,7 @@ export default function App() {
   const handlePageInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') {
       const val = parseInt(pageInputValue);
-      const totalPages = (thumbnails || []).length;
+      const totalPages = numPages || 0;
       if (!isNaN(val) && val >= 1 && val <= totalPages) {
         setCurrentPage(val);
       } else {
@@ -579,8 +602,17 @@ export default function App() {
     const checkServer = async () => {
       try {
         const res = await fetch('/api/health');
-        const data = await res.json();
-        console.log("Server health check:", data);
+        if (!res.ok) {
+          throw new Error(`HTTP error! status: ${res.status}`);
+        }
+        const contentType = res.headers.get("content-type");
+        if (contentType && contentType.indexOf("application/json") !== -1) {
+          const data = await res.json();
+          console.log("Server health check:", data);
+        } else {
+          const text = await res.text();
+          console.error("Server health check returned non-JSON response:", text.substring(0, 100));
+        }
       } catch (err) {
         console.error("Server health check failed:", err);
       }
@@ -589,10 +621,34 @@ export default function App() {
   }, []);
 
   const [docName, setDocName] = useState<string>("");
+  const [numPages, setNumPages] = useState<number>(0);
 
   useEffect(() => {
+    // Cleanup blob URLs on unmount or when pdfUrl changes
+    return () => {
+      if (pdfUrl && pdfUrl.startsWith('blob:')) {
+        console.log("Cleaning up blob URL:", pdfUrl);
+        URL.revokeObjectURL(pdfUrl);
+      }
+    };
+  }, [pdfUrl]);
+  useEffect(() => {
+    // Fail-safe: Always stop auth loading after 10 seconds
+    const authTimeout = setTimeout(() => {
+      if (isAuthLoading) {
+        console.warn("Auth check timed out after 10s, forcing loading to end.");
+        setIsAuthLoading(false);
+      }
+    }, 10000);
+
     const initAuth = async () => {
       if (token) {
+        if (!navigator.onLine) {
+          console.log("App: Working in offline mode with cached session.");
+          setIsAuthLoading(false);
+          return;
+        }
+
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 5000); // 5s timeout
 
@@ -604,8 +660,15 @@ export default function App() {
           clearTimeout(timeoutId);
           
           if (res.ok) {
-            const userData = await res.json();
-            setUser(userData);
+            const contentType = res.headers.get("content-type");
+            if (contentType && contentType.indexOf("application/json") !== -1) {
+              const userData = await res.json();
+              setUser(userData);
+              localStorage.setItem('auth_user', JSON.stringify(userData));
+            } else {
+              const text = await res.text();
+              console.error("Auth check returned non-JSON response:", text.substring(0, 100));
+            }
           } else if (res.status === 401) {
             handleLogout();
           }
@@ -615,9 +678,10 @@ export default function App() {
           } else {
             console.error("Auth check failed", err);
           }
-          // On network error, we might want to keep the user if we have cached data,
-          // but for security we usually want a fresh check.
-          // However, for "speed", we could implement a more complex offline strategy.
+          // On network error, we stay with the cached user if we have one
+          if (user) {
+            console.log("App: Network error, maintaining cached user session.");
+          }
         }
       }
       setIsAuthLoading(false);
@@ -629,6 +693,7 @@ export default function App() {
     setToken(newToken);
     setUser(userData);
     localStorage.setItem('auth_token', newToken);
+    localStorage.setItem('auth_user', JSON.stringify(userData));
     showToast(`Bem-vindo, ${userData.name}!`);
   };
 
@@ -637,6 +702,7 @@ export default function App() {
     setUser(null);
     setIsAdminView(false);
     localStorage.removeItem('auth_token');
+    localStorage.removeItem('auth_user');
     showToast("Você saiu do sistema.");
   };
 
@@ -1031,7 +1097,7 @@ export default function App() {
       if (pdfUrl && !isChatLoading) {
         if (e.key === 'ArrowRight' || e.key === 'ArrowDown' || e.key === 'PageDown') {
           e.preventDefault();
-          setCurrentPage(prev => Math.min((thumbnails || []).length, prev + 1));
+          setCurrentPage(prev => Math.min(numPages || 1, prev + 1));
         } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp' || e.key === 'PageUp') {
           e.preventDefault();
           setCurrentPage(prev => Math.max(1, prev - 1));
@@ -1040,13 +1106,13 @@ export default function App() {
           setCurrentPage(1);
         } else if (e.key === 'End') {
           e.preventDefault();
-          setCurrentPage((thumbnails || []).length);
+          setCurrentPage(numPages || 1);
         } else if (e.key === ' ') {
           e.preventDefault();
           if (e.shiftKey) {
             setCurrentPage(prev => Math.max(1, prev - 1));
           } else {
-            setCurrentPage(prev => Math.min((thumbnails || []).length, prev + 1));
+            setCurrentPage(prev => Math.min(numPages || 1, prev + 1));
           }
         }
       }
@@ -1057,7 +1123,7 @@ export default function App() {
       window.removeEventListener('resize', checkMobile);
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [pdfUrl, handleSave, handlePrint, (thumbnails || []).length, isChatLoading]);
+  }, [pdfUrl, handleSave, handlePrint, numPages, isChatLoading]);
 
   const handlePdfClick = () => {
     return;
@@ -1176,6 +1242,8 @@ export default function App() {
       setSearchResults([]);
       setEdits([]);
       setCurrentPage(1);
+      setNumPages(0);
+      setThumbnails([]);
 
       // Load analysis and annotations
       const [analysisRes, annotationsRes] = await Promise.all([
@@ -1357,7 +1425,7 @@ export default function App() {
         setCurrentPage(prev => Math.max(1, prev - 1));
       }
       if (e.key === 'ArrowRight') {
-        setCurrentPage(prev => Math.min((thumbnails || []).length, prev + 1));
+        setCurrentPage(prev => Math.min(numPages || 0, prev + 1));
       }
 
       // Clear modes
@@ -1367,7 +1435,7 @@ export default function App() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [pdfUrl, isSaving, isPrinting, (thumbnails || []).length]);
+  }, [pdfUrl, isSaving, isPrinting, numPages]);
 
   const handleClearAllAnnotations = async () => {
     if (!docId) return;
@@ -1569,6 +1637,8 @@ export default function App() {
       setSearchResults([]);
       setEdits([]);
       setCurrentPage(1);
+      setNumPages(0);
+      setThumbnails([]);
       
       setDocId(data.id);
       
@@ -1624,12 +1694,6 @@ export default function App() {
 
   const [isSearchNavOpen, setIsSearchNavOpen] = useState(false);
 
-  useEffect(() => {
-    if (fullText) {
-      handleSearch();
-    }
-  }, [fixedKeywords, fullText]);
-
   const handleSearch = useCallback((customQueries?: string[]) => {
     // If no custom queries, use the search input combined with fixed keywords
     const inputQueries = searchFilters.multipleKeywords 
@@ -1671,35 +1735,45 @@ export default function App() {
     }));
 
     pages.forEach((pageText, index) => {
+      // index 0 is typically empty if the first page starts with the header
+      // but we use index as the page number since fullText.split(/--- Page \d+ ---/)
+      // results in index 1 being Page 1, index 2 being Page 2, etc.
       if (index < startPage || index > endPage) return;
+      if (!pageText.trim()) return;
       
       let totalOnPage = 0;
       let matchFound = false;
       let firstMatchSnippet = "";
 
       queryRegexes.forEach(({ query, regex }) => {
-        const pageMatches = pageText.match(regex);
+        // Reset regex lastIndex for consistent matches if needed (though match() handles it)
+        const pageMatches = pageText.matchAll(regex);
+        let mIdx = 0;
         
-        if (pageMatches) {
-          totalOnPage += pageMatches.length;
+        for (const match of pageMatches) {
+          totalOnPage++;
           matchFound = true;
           
-          // Collect individual matches
-          pageMatches.forEach((_, mIdx) => {
-            const matchObj = { 
-              page: index, 
-              query, 
-              id: `${index}-${query}-${mIdx}-${Math.random().toString(36).substr(2, 9)}`,
-              occurrenceIndexOnPage: mIdx
-            };
-            matches.push(matchObj);
-            newGroupedMatches[query].matches.push(matchObj);
-          });
+          const matchStart = match.index || 0;
+          const snippet = pageText.substring(
+            Math.max(0, matchStart - 30), 
+            Math.min(pageText.length, matchStart + query.length + 40)
+          ).replace(/\n/g, ' ');
 
+          const matchObj = { 
+            page: index, 
+            query, 
+            id: `${index}-${query}-${mIdx}-${Math.random().toString(36).substr(2, 9)}`,
+            occurrenceIndexOnPage: mIdx,
+            snippet: `...${snippet.trim()}...`
+          };
+          matches.push(matchObj);
+          newGroupedMatches[query].matches.push(matchObj);
+          
           if (!firstMatchSnippet) {
-            const matchIndex = pageText.toLowerCase().indexOf(query.toLowerCase());
-            firstMatchSnippet = pageText.substring(Math.max(0, matchIndex - 40), Math.min(pageText.length, matchIndex + 60));
+            firstMatchSnippet = snippet;
           }
+          mIdx++;
         }
       });
 
@@ -1796,6 +1870,16 @@ export default function App() {
     setIsSearchNavOpen(false);
     setFixedKeywords([]);
   };
+
+  useEffect(() => {
+    if (!fullText) return;
+    
+    const timer = setTimeout(() => {
+      handleSearch();
+    }, 500);
+    
+    return () => clearTimeout(timer);
+  }, [fixedKeywords, fullText, searchQuery, searchFilters, handleSearch]);
 
   const [analysisSearchQuery, setAnalysisSearchQuery] = useState("");
   const [relevanceFilter, setRelevanceFilter] = useState<string>("ALL");
@@ -1941,51 +2025,88 @@ export default function App() {
 
   if (!token || !user) {
     return (
-      <Login 
-        onLogin={handleLogin} 
-        onInstall={handleInstallApp}
-        isStandalone={isStandalone}
-      />
+      <Suspense fallback={<div className="flex items-center justify-center h-screen"><Loader2 className="animate-spin" /></div>}>
+        <Login 
+          onLogin={handleLogin} 
+          onInstall={handleInstallApp}
+          isStandalone={isStandalone}
+        />
+      </Suspense>
     );
   }
 
   if (isAdminView && user.role === 'admin') {
-    return <AdminDashboard token={token} onBack={() => setIsAdminView(false)} showToast={showToast} fetchWithAuth={fetchWithAuth} />;
+    return (
+      <Suspense fallback={<div className="flex items-center justify-center h-screen"><Loader2 className="animate-spin" /></div>}>
+        <AdminDashboard token={token} onBack={() => setIsAdminView(false)} showToast={showToast} fetchWithAuth={fetchWithAuth} />
+      </Suspense>
+    );
   }
 
   return (
     <div className="flex flex-col h-screen w-full overflow-hidden font-sans bg-white text-neutral-900 dark:bg-neutral-950 dark:text-neutral-50 transition-colors duration-300">
       
-      {/* PWA Installer Modal */}
-      <PWAInstallerModal 
-        isOpen={showInstallerModal} 
-        onClose={() => setShowInstallerModal(false)} 
-        onInstall={handleInstallApp} 
-        isInstallSupported={!!deferredPrompt}
-      />
+      <Suspense fallback={null}>
+        {/* PWA Installer Modal */}
+        <PWAInstallerModal 
+          isOpen={showInstallerModal} 
+          onClose={() => setShowInstallerModal(false)} 
+          onInstall={handleInstallApp} 
+          isInstallSupported={!!deferredPrompt}
+        />
 
-      {/* Detailed Analysis Modal */}
-      <DetailedAnalysisModal 
-        isOpen={isDetailedAnalysisOpen} 
-        onClose={() => setIsDetailedAnalysisOpen(false)} 
-        aiAnalysis={aiAnalysis}
-        onPrint={handlePrintAnalysis}
-        onSave={handleExportCSV}
-        onOpenReader={(page) => {
-          setReaderPage(page);
-          setIsReaderMode(true);
-        }}
-      />
+        {/* Detailed Analysis Modal */}
+        <DetailedAnalysisModal 
+          isOpen={isDetailedAnalysisOpen} 
+          onClose={() => setIsDetailedAnalysisOpen(false)} 
+          aiAnalysis={aiAnalysis}
+          onPrint={handlePrintAnalysis}
+          onSave={handleExportCSV}
+          onOpenReader={(page) => {
+            setReaderPage(page);
+            setIsReaderMode(true);
+          }}
+        />
 
-      <FindingDetailsModal 
-        isOpen={!!selectedFinding} 
-        onClose={() => setSelectedFinding(null)} 
-        onOpenReader={(page) => {
-          setReaderPage(page);
-          setIsReaderMode(true);
-        }}
-        finding={selectedFinding} 
-      />
+        <FindingDetailsModal 
+          isOpen={!!selectedFinding} 
+          onClose={() => setSelectedFinding(null)} 
+          onOpenReader={(page) => {
+            setReaderPage(page);
+            setIsReaderMode(true);
+          }}
+          finding={selectedFinding} 
+        />
+
+        <SettingsModal 
+          isOpen={isSettingsOpen} 
+          onClose={() => setIsSettingsOpen(false)}
+          apiKeys={apiKeys}
+          setApiKeys={setApiKeys}
+          selectedApiKeyId={selectedApiKeyId}
+          setSelectedApiKeyId={setSelectedApiKeyId}
+          aiFixedPrompt={aiFixedPrompt}
+          setAiFixedPrompt={setAiFixedPrompt}
+          prompts={prompts}
+          user={user}
+        />
+
+        <ConfirmationModal
+          isOpen={confirmModal.isOpen}
+          onClose={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))}
+          onConfirm={confirmModal.onConfirm}
+          title={confirmModal.title}
+          message={confirmModal.message}
+          variant={confirmModal.variant}
+        />
+
+        <PromptEditorModal
+          isOpen={isPromptEditorOpen}
+          onClose={() => setIsPromptEditorOpen(false)}
+          prompt={editingPrompt}
+          onSave={handleSavePrompt}
+        />
+      </Suspense>
 
       {/* Full Screen Reader Mode */}
       <AnimatePresence>
@@ -2300,11 +2421,11 @@ export default function App() {
                   onBlur={handlePageInputBlur}
                   className="w-10 h-7 bg-neutral-100 border border-neutral-200 rounded text-center text-xs font-bold focus:ring-1 ring-blue-500 outline-none"
                 />
-                <span className="text-[10px] font-black uppercase tracking-widest text-neutral-400">/ {(thumbnails || []).length}</span>
+                <span className="text-[10px] font-black uppercase tracking-widest text-neutral-400">/ {numPages}</span>
               </div>
               <button 
-                disabled={currentPage === (thumbnails || []).length}
-                onClick={() => setCurrentPage(Math.min((thumbnails || []).length, currentPage + 1))}
+                disabled={currentPage === numPages}
+                onClick={() => setCurrentPage(Math.min(numPages || 1, currentPage + 1))}
                 className="p-1 hover:bg-neutral-100 rounded-lg disabled:opacity-30"
               >
                 <ChevronRight size={18} />
@@ -2716,6 +2837,7 @@ export default function App() {
                     currentPage={currentPage}
                     zoom={zoom}
                     onPageChange={setCurrentPage}
+                    onNumPagesLoaded={setNumPages}
                     onTextExtract={(text) => {
                       setFullText(text);
                       if (docId) {
@@ -2724,7 +2846,6 @@ export default function App() {
                         );
                       }
                     }}
-                    onThumbnailsGenerated={setThumbnails}
                     highlightQueries={highlightQueries}
                     currentMatch={activeMatch}
                     showAll={searchFilters.showAll}
@@ -2839,8 +2960,8 @@ export default function App() {
           {pdfUrl && (
             <div className="absolute bottom-6 md:bottom-8 left-1/2 -translate-x-1/2 flex items-center gap-2 md:gap-4 bg-white/90 dark:bg-neutral-900/90 backdrop-blur-md px-3 md:px-4 py-1.5 md:py-2 rounded-full shadow-2xl border border-neutral-200 dark:border-neutral-800 z-30">
               <button onClick={() => setCurrentPage(p => Math.max(1, p - 1))} className="p-1 hover:bg-neutral-100 dark:hover:bg-neutral-800 rounded-full"><ChevronLeft size={18} md:size={20} /></button>
-              <span className="text-[10px] md:text-sm font-mono whitespace-nowrap">Pág. {currentPage} / {(thumbnails || []).length}</span>
-              <button onClick={() => setCurrentPage(p => Math.min((thumbnails || []).length, p + 1))} className="p-1 hover:bg-neutral-100 dark:hover:bg-neutral-800 rounded-full"><ChevronRight size={18} md:size={20} /></button>
+              <span className="text-[10px] md:text-sm font-mono whitespace-nowrap">Pág. {currentPage} / {numPages}</span>
+              <button onClick={() => setCurrentPage(p => Math.min(numPages || 1, p + 1))} className="p-1 hover:bg-neutral-100 dark:hover:bg-neutral-800 rounded-full"><ChevronRight size={18} md:size={20} /></button>
             </div>
           )}
         </div>
@@ -2902,57 +3023,59 @@ export default function App() {
         </div>
 
         <div className="flex-1 overflow-y-auto p-4 min-w-[200px]">
-              <AnimatePresence mode="wait">
-                {activeTab === 'search' && (
-                  <SearchTab 
-                    searchQuery={searchQuery}
-                    setSearchQuery={setSearchQuery}
-                    searchFilters={searchFilters}
-                    setSearchFilters={setSearchFilters}
-                    handleSearch={handleSearch}
-                    handleClearAllSearch={handleClearAllSearch}
-                    fixedKeywords={fixedKeywords}
-                    addFixedKeyword={addFixedKeyword}
-                    addFixedKeywordsList={addFixedKeywordsList}
-                    isBulkKeywordsModalOpen={isBulkKeywordsModalOpen}
-                    setIsBulkKeywordsModalOpen={setIsBulkKeywordsModalOpen}
-                    removeFixedKeyword={removeFixedKeyword}
-                    removeNotFoundKeywords={removeNotFoundKeywords}
-                    groupedMatches={groupedMatches}
-                    navigateKeywordMatch={navigateKeywordMatch}
-                    setCurrentPage={setCurrentPage}
-                    showHighlights={showHighlights}
-                    setShowHighlights={setShowHighlights}
-                  />
-                )}
+              <Suspense fallback={<div className="flex items-center justify-center p-8"><Loader2 className="animate-spin text-blue-600" /></div>}>
+                <AnimatePresence mode="wait">
+                  {activeTab === 'search' && (
+                    <SearchTab 
+                      searchQuery={searchQuery}
+                      setSearchQuery={setSearchQuery}
+                      searchFilters={searchFilters}
+                      setSearchFilters={setSearchFilters}
+                      handleSearch={handleSearch}
+                      handleClearAllSearch={handleClearAllSearch}
+                      fixedKeywords={fixedKeywords}
+                      addFixedKeyword={addFixedKeyword}
+                      addFixedKeywordsList={addFixedKeywordsList}
+                      isBulkKeywordsModalOpen={isBulkKeywordsModalOpen}
+                      setIsBulkKeywordsModalOpen={setIsBulkKeywordsModalOpen}
+                      removeFixedKeyword={removeFixedKeyword}
+                      removeNotFoundKeywords={removeNotFoundKeywords}
+                      groupedMatches={groupedMatches}
+                      navigateKeywordMatch={navigateKeywordMatch}
+                      setCurrentPage={setCurrentPage}
+                      showHighlights={showHighlights}
+                      setShowHighlights={setShowHighlights}
+                    />
+                  )}
 
-                {activeTab === 'ai' && (
-                  <AITab 
-                    prompts={prompts}
-                    selectedPromptId={selectedPromptId}
-                    setSelectedPromptId={setSelectedPromptId}
-                    handleEditPrompt={handleEditPrompt}
-                    handleDeletePrompt={handleDeletePrompt}
-                    handleAddPrompt={handleAddPrompt}
-                    handleResetPrompts={handleResetPrompts}
-                    handleClearAnalysis={handleClearAnalysis}
-                    handleAiAnalyze={handleAiAnalyze}
-                    isAiAnalyzing={isAiAnalyzing}
-                    pdfUrl={pdfUrl}
-                    fullText={fullText}
-                    setIsDetailedAnalysisOpen={setIsDetailedAnalysisOpen}
-                    aiAnalysis={aiAnalysis}
-                    setSelectedFinding={setSelectedFinding}
-                    setCurrentPage={setCurrentPage}
-                    chatMessages={chatMessages}
-                    isChatLoading={isChatLoading}
-                    userInput={userInput}
-                    setUserInput={setUserInput}
-                    handleSendMessage={handleSendMessage}
-                    chatEndRef={chatEndRef}
-                  />
-                )}
-                {activeTab === 'history' && (
+                  {activeTab === 'ai' && (
+                    <AITab 
+                      prompts={prompts}
+                      selectedPromptId={selectedPromptId}
+                      setSelectedPromptId={setSelectedPromptId}
+                      handleEditPrompt={handleEditPrompt}
+                      handleDeletePrompt={handleDeletePrompt}
+                      handleAddPrompt={handleAddPrompt}
+                      handleResetPrompts={handleResetPrompts}
+                      handleClearAnalysis={handleClearAnalysis}
+                      handleAiAnalyze={handleAiAnalyze}
+                      isAiAnalyzing={isAiAnalyzing}
+                      pdfUrl={pdfUrl}
+                      fullText={fullText}
+                      setIsDetailedAnalysisOpen={setIsDetailedAnalysisOpen}
+                      aiAnalysis={aiAnalysis}
+                      setSelectedFinding={setSelectedFinding}
+                      setCurrentPage={setCurrentPage}
+                      chatMessages={chatMessages}
+                      isChatLoading={isChatLoading}
+                      userInput={userInput}
+                      setUserInput={setUserInput}
+                      handleSendMessage={handleSendMessage}
+                      chatEndRef={chatEndRef}
+                      isOnline={isOnline}
+                    />
+                  )}
+                  {activeTab === 'history' && (
                   <motion.div initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -10 }} className="space-y-4">
                     <div className="flex items-center justify-between mb-2">
                       <h3 className="text-[10px] font-black uppercase text-neutral-400 tracking-widest">Documentos Recentes</h3>
@@ -3017,7 +3140,8 @@ export default function App() {
                   </motion.div>
                 )}
               </AnimatePresence>
-            </div>
+            </Suspense>
+          </div>
           </div>
         </div>
     </div>

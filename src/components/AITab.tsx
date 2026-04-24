@@ -26,6 +26,7 @@ interface AITabProps {
   setUserInput: (i: string) => void;
   handleSendMessage: (overrideInput?: string) => void;
   chatEndRef: React.RefObject<HTMLDivElement | null>;
+  isOnline: boolean;
 }
 
 export const AITab: React.FC<AITabProps> = React.memo(({
@@ -50,7 +51,8 @@ export const AITab: React.FC<AITabProps> = React.memo(({
   userInput,
   setUserInput,
   handleSendMessage,
-  chatEndRef
+  chatEndRef,
+  isOnline
 }) => {
   return (
     <motion.div initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -10 }} className="space-y-6">
@@ -145,13 +147,23 @@ export const AITab: React.FC<AITabProps> = React.memo(({
       </div>
 
       <div className="pt-4 border-t border-neutral-100 dark:border-neutral-800 space-y-3">
+        {!isOnline && (
+          <div className="bg-amber-50 dark:bg-amber-900/20 p-4 rounded-2xl border border-amber-100 dark:border-amber-800 flex items-center gap-3">
+            <div className="w-8 h-8 rounded-full bg-amber-500 flex items-center justify-center text-white flex-shrink-0 animate-pulse">
+              <Brain size={14} />
+            </div>
+            <p className="text-[10px] font-bold text-amber-700 dark:text-amber-400 leading-tight">
+              O chat e a análise com IA requerem conexão com a internet.
+            </p>
+          </div>
+        )}
         <div className="flex gap-2">
           <button 
             onClick={handleAiAnalyze}
-            disabled={isAiAnalyzing || !pdfUrl || !fullText}
+            disabled={isAiAnalyzing || !pdfUrl || !fullText || !isOnline}
             className="flex-1 bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 text-neutral-500 py-3.5 rounded-2xl text-xs font-bold uppercase tracking-widest hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
           >
-            {isAiAnalyzing ? <Loader2 size={16} className="animate-spin" /> : <RotateCcw size={16} />}
+            {isAiAnalyzing ? <Loader2 size={16} className="animate-spin text-blue-600" /> : <RotateCcw size={16} className="text-neutral-400" />}
             Analisar
           </button>
           {aiAnalysis && (
@@ -292,16 +304,16 @@ export const AITab: React.FC<AITabProps> = React.memo(({
               <div className="relative">
                 <input 
                   type="text" 
-                  placeholder="Pergunte algo sobre o documento..." 
+                  placeholder={isOnline ? "Pergunte algo sobre o documento..." : "Sem conexão com a internet..."}
                   className="w-full bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-xl pl-4 pr-12 py-3 text-xs outline-none focus:ring-2 ring-blue-500/20 transition-all shadow-sm"
                   value={userInput}
                   onChange={(e) => setUserInput(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
-                  disabled={isChatLoading}
+                  disabled={isChatLoading || !isOnline}
                 />
                 <button 
                   onClick={() => handleSendMessage()}
-                  disabled={!userInput.trim() || isChatLoading}
+                  disabled={!userInput.trim() || isChatLoading || !isOnline}
                   className="absolute right-2 top-1/2 -translate-y-1/2 p-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-all disabled:opacity-50 disabled:hover:bg-blue-600"
                 >
                   <Send size={14} />
