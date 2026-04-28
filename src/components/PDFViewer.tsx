@@ -4,7 +4,12 @@ import * as pdfjsLib from 'pdfjs-dist';
 import { motion } from 'motion/react';
 import { cn } from '../lib/utils';
 
-// Fallback for local worker if CDN fails (optional, but good for offline)
+const removeAccents = (str: string) => {
+  if (!str) return "";
+  return str.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+};
+
+// Fallback for local worker if CDN fails
 // import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.mjs?url';
 // if (typeof window !== 'undefined' && !pdfjsLib.GlobalWorkerOptions.workerSrc) {
 //   pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
@@ -130,7 +135,10 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({
                 
                 // 1. Extract Text (Always do this)
                 const textContent = await page.getTextContent();
-                const pageText = (textContent.items || []).map((item: any) => item.str).join(" ");
+                const pageText = (textContent.items || [])
+                  .map((item: any) => item.str)
+                  .join(" ")
+                  .replace(/\s+/g, " "); // Normalize multiple spaces to single space
                 pageTexts[pageNum - 1] = pageText;
 
               } catch (pageErr) {
@@ -249,25 +257,47 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({
           // Calculate highlights
           if ((highlightQueries || []).length > 0) {
             const newHighlights: any[] = [];
-          const lowerQueries = (highlightQueries || []).map(q => q.toLowerCase());
+          const queryInfos = (highlightQueries || []).map(q => ({
+            original: q,
+            lower: q.toLowerCase(),
+            normalized: removeAccents(q.toLowerCase())
+          }));
           const queryCounters: Record<string, number> = {};
-          lowerQueries.forEach(q => queryCounters[q] = 0);
+          queryInfos.forEach(info => queryCounters[info.original] = 0);
 
           textContent.items.forEach((item: any) => {
-            const str = item.str.toLowerCase();
-            lowerQueries.forEach((query) => {
-              let startIdx = 0;
-              while ((startIdx = str.indexOf(query, startIdx)) !== -1) {
-                const currentCounter = queryCounters[query];
+            const originalStr = item.str;
+            const lowerStr = originalStr.toLowerCase();
+            const normalizedStr = removeAccents(lowerStr);
+
+            queryInfos.forEach((info) => {
+              const query = info.lower;
+              const normalizedQuery = info.normalized;
+              
+              let startIdx = -1;
+              
+              // Try exact match first
+              let foundIdx = lowerStr.indexOf(query);
+              let useFuzzy = false;
+              
+              if (foundIdx === -1 && normalizedQuery.length > 2) {
+                foundIdx = normalizedStr.indexOf(normalizedQuery);
+                useFuzzy = true;
+              }
+
+              while (foundIdx !== -1) {
+                const currentCounter = queryCounters[info.original];
                 const isCurrent = currentMatch?.page === currentPage && 
-                                 currentMatch?.query.toLowerCase() === query &&
+                                 currentMatch?.query === info.original &&
                                  (currentMatch?.occurrenceIndexOnPage === undefined || 
                                   currentMatch?.occurrenceIndexOnPage === currentCounter);
 
                 // If showAll is false, we only show if it's the current match
                 if (!showAll && !isCurrent) {
-                  queryCounters[query]++;
-                  startIdx += query.length;
+                  queryCounters[info.original]++;
+                  foundIdx = useFuzzy 
+                    ? normalizedStr.indexOf(normalizedQuery, foundIdx + 1)
+                    : lowerStr.indexOf(query, foundIdx + 1);
                   continue;
                 }
 
@@ -284,8 +314,10 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({
                   isCurrent
                 });
                 
-                queryCounters[query]++;
-                startIdx += query.length;
+                queryCounters[info.original]++;
+                foundIdx = useFuzzy 
+                  ? normalizedStr.indexOf(normalizedQuery, foundIdx + 1)
+                  : lowerStr.indexOf(query, foundIdx + 1);
               }
             });
           });

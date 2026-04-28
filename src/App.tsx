@@ -131,6 +131,12 @@ interface GroupedMatch {
   currentIndex: number;
 }
 
+// Utility to remove accents for fuzzy searching
+const removeAccents = (str: string) => {
+  if (!str) return "";
+  return str.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+};
+
 export default function App() {
   const [user, setUser] = useState<any>(() => {
     try {
@@ -1738,28 +1744,33 @@ export default function App() {
       if (!isNaN(end)) endPage = Math.min((pages || []).length - 1, end);
     }
 
-    const queryRegexes = (allQueries || []).map(query => ({
-      query,
-      regex: new RegExp(query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), searchFilters.caseSensitive ? 'g' : 'gi')
-    }));
+    const queryRegexes = (allQueries || []).map(query => {
+      // Create a regex for the exact query
+      const escapedQuery = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      return {
+        query,
+        regex: new RegExp(escapedQuery, searchFilters.caseSensitive ? 'g' : 'gi'),
+        normalizedQuery: removeAccents(query).toLowerCase()
+      };
+    });
 
     pages.forEach((pageText, index) => {
-      // index 0 is typically empty if the first page starts with the header
-      // but we use index as the page number since fullText.split(/--- Page \d+ ---/)
-      // results in index 1 being Page 1, index 2 being Page 2, etc.
       if (index < startPage || index > endPage) return;
       if (!pageText.trim()) return;
       
+      const normalizedPageText = removeAccents(pageText).toLowerCase();
       let totalOnPage = 0;
       let matchFound = false;
       let firstMatchSnippet = "";
 
-      queryRegexes.forEach(({ query, regex }) => {
-        // Reset regex lastIndex for consistent matches if needed (though match() handles it)
+      queryRegexes.forEach(({ query, regex, normalizedQuery }) => {
+        // Try exact regex match first on original text
         const pageMatches = pageText.matchAll(regex);
         let mIdx = 0;
-        
+        let foundAny = false;
+
         for (const match of pageMatches) {
+          foundAny = true;
           totalOnPage++;
           matchFound = true;
           
@@ -1779,10 +1790,38 @@ export default function App() {
           matches.push(matchObj);
           newGroupedMatches[query].matches.push(matchObj);
           
-          if (!firstMatchSnippet) {
-            firstMatchSnippet = snippet;
-          }
+          if (!firstMatchSnippet) firstMatchSnippet = snippet;
           mIdx++;
+        }
+
+        // If no exact matches but we want fuzzy/normalized matching
+        // (Only if not case sensitive or if no exact match found)
+        if (!foundAny && normalizedQuery.length > 2) {
+          let pos = normalizedPageText.indexOf(normalizedQuery);
+          while (pos !== -1) {
+            totalOnPage++;
+            matchFound = true;
+            
+            // Extract snippet from original text using the same position
+            const snippet = pageText.substring(
+              Math.max(0, pos - 30), 
+              Math.min(pageText.length, pos + query.length + 40)
+            ).replace(/\n/g, ' ');
+
+            const matchObj = { 
+              page: index, 
+              query, 
+              id: `${index}-${query}-fuzzy-${mIdx}-${Math.random().toString(36).substr(2, 9)}`,
+              occurrenceIndexOnPage: mIdx,
+              snippet: `...${snippet.trim()}...`
+            };
+            matches.push(matchObj);
+            newGroupedMatches[query].matches.push(matchObj);
+            
+            if (!firstMatchSnippet) firstMatchSnippet = snippet;
+            mIdx++;
+            pos = normalizedPageText.indexOf(normalizedQuery, pos + 1);
+          }
         }
       });
 
@@ -1883,12 +1922,8 @@ export default function App() {
   useEffect(() => {
     if (!fullText) return;
     
-    const timer = setTimeout(() => {
-      handleSearch();
-    }, 500);
-    
-    return () => clearTimeout(timer);
-  }, [fixedKeywords, fullText, searchQuery, searchFilters, handleSearch]);
+    handleSearch();
+  }, [fixedKeywords, fullText, debouncedSearchQuery, searchFilters, handleSearch]);
 
   const [analysisSearchQuery, setAnalysisSearchQuery] = useState("");
   const [relevanceFilter, setRelevanceFilter] = useState<string>("ALL");
